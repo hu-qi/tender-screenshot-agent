@@ -1,0 +1,1 @@
+This short-lived verification branch exists to run the CI matrix against the WeCom Bot runtime integration. The source changes are already present on main; no product behavior is changed by this marker.
