@@ -367,6 +367,7 @@ fn configure_wecom_bot(input: ConfigureWeComBotInput, state: State<AppState>) ->
         (!normalized.is_empty()).then_some(normalized)
     });
     let enabled = input.enabled.unwrap_or(true);
+    let enabled_as_int = if enabled { 1_i64 } else { 0_i64 };
 
     set_keychain_secret(WECOM_BOT_ID_ACCOUNT, bot_id)?;
     set_keychain_secret(WECOM_BOT_SECRET_ACCOUNT, secret)?;
@@ -374,7 +375,7 @@ fn configure_wecom_bot(input: ConfigureWeComBotInput, state: State<AppState>) ->
     let db = state.db.lock().map_err(|_| "database lock")?;
     db.execute(
         "INSERT INTO notification_profiles(id,transport,enabled,target_chat_ids_json,websocket_url,updated_at) VALUES(?1,'wecom-bot-id-secret',?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET transport=excluded.transport,enabled=excluded.enabled,target_chat_ids_json=excluded.target_chat_ids_json,websocket_url=excluded.websocket_url,updated_at=excluded.updated_at",
-        params![WECOM_PROFILE_ID, i64::from(enabled), serde_json::to_string(&target_chat_ids).map_err(|error| error.to_string())?, websocket_url, now()],
+        params![WECOM_PROFILE_ID, enabled_as_int, serde_json::to_string(&target_chat_ids).map_err(|error| error.to_string())?, websocket_url, now()],
     )
     .map_err(|error| error.to_string())?;
     log_event(&db, None, "INFO", "wecom_bot_credentials_saved_to_keychain")?;
