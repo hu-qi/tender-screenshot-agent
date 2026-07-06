@@ -1,1 +1,47 @@
-{"providers":[{"id":"internal-qwen","type":"llm","baseUrl":"http://internal-gateway/v1","model":"qwen","credentialRef":"keychain://tender-agent/internal-qwen","enabled":false,"allowedPrivacyModes":["internal-enhanced","hybrid"]},{"id":"internal-paddleocr","type":"ocr","baseUrl":"http://internal-gateway/v1","model":"PaddleOCR-VL","credentialRef":"keychain://tender-agent/internal-paddleocr","enabled":false,"allowedPrivacyModes":["internal-enhanced","hybrid"]},{"id":"wecom","type":"notification","credentialRef":"keychain://tender-agent/wecom-webhook","enabled":false}]}
+{
+  "providers": [
+    {
+      "id": "internal-qwen",
+      "type": "llm",
+      "baseUrl": "http://internal-gateway/v1",
+      "model": "qwen",
+      "credentialRef": "keychain://tender-agent/internal-qwen",
+      "enabled": false,
+      "allowedPrivacyModes": ["internal-enhanced", "hybrid"]
+    },
+    {
+      "id": "internal-paddleocr",
+      "type": "ocr",
+      "baseUrl": "http://internal-gateway/v1",
+      "model": "PaddleOCR-VL",
+      "credentialRef": "keychain://tender-agent/internal-paddleocr",
+      "enabled": false,
+      "allowedPrivacyModes": ["internal-enhanced", "hybrid"]
+    },
+    {
+      "id": "wecom-bot",
+      "type": "notification",
+      "transport": "wecom-bot-id-secret",
+      "botIdCredentialRef": "keychain://tender-agent/wecom-bot-id",
+      "secretCredentialRef": "keychain://tender-agent/wecom-bot-secret",
+      "enabled": false,
+      "deliveryPolicy": {
+        "sendTaskStarted": false,
+        "sendTaskCompleted": true,
+        "sendTaskFailed": true,
+        "sendManualReviewRequired": true,
+        "redactEvidencePaths": true,
+        "redactProjectContent": false
+      }
+    },
+    {
+      "id": "wecom-group-webhook-legacy",
+      "type": "notification",
+      "transport": "wecom-group-webhook-legacy",
+      "credentialRef": "keychain://tender-agent/wecom-group-webhook",
+      "enabled": false,
+      "deprecated": true,
+      "migrationNote": "Use wecom-bot with Bot ID and Secret for new deployments."
+    }
+  ]
+}
