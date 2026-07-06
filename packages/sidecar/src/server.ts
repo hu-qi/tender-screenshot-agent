@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { getPlatform } from './platforms.js';
+import { deliverWeComMarkdown, testWeComBot } from './wecom-bot.js';
 
 type Rpc = { id: string | number; method: string; params?: Record<string, unknown> };
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
@@ -12,7 +13,6 @@ type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 function loadDotEnv(): void {
   const file = process.env.TENDER_ENV_FILE || join(process.cwd(), '.env');
   if (!existsSync(file)) return;
-
   for (const sourceLine of readFileSync(file, 'utf8').split(/\r?\n/)) {
     const line = sourceLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -21,8 +21,7 @@ function loadDotEnv(): void {
     const key = line.slice(0, separator).trim();
     if (!/^[A-Z][A-Z0-9_]*$/.test(key) || process.env[key] !== undefined) continue;
     const raw = line.slice(separator + 1).trim();
-    const value = raw.replace(/^(['"])(.*)\1$/, '$2');
-    process.env[key] = value;
+    process.env[key] = raw.replace(/^(['"])(.*)\1$/, '$2');
   }
 }
 
@@ -37,18 +36,12 @@ const evidenceRoot = process.env.TENDER_DATA_DIR ? resolve(process.env.TENDER_DA
 function redact(message: string): string {
   return message
     .replace(/(Bearer\s+)[^\s]+/gi, '$1[REDACTED]')
-    .replace(/\b(authorization|api[_-]?key|token|cookie|webhook)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');
+    .replace(/\b(authorization|api[_-]?key|token|cookie|webhook|secret|bot[_-]?id)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');
 }
 
 function log(level: LogLevel, event: string, fields: Record<string, unknown> = {}): void {
   if (levelOrder[level] > levelOrder[activeLevel]) return;
-  process.stderr.write(`${JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level,
-    component: 'playwright-sidecar',
-    event,
-    ...fields,
-  })}\n`);
+  process.stderr.write(`${JSON.stringify({ timestamp: new Date().toISOString(), level, component: 'tender-sidecar', event, ...fields })}\n`);
 }
 
 const send = (id: string | number | null, result?: unknown, error?: unknown): void => {
@@ -73,96 +66,97 @@ function outputDirectory(params: Record<string, unknown>, platformId: string): s
   return supplied ? resolve(supplied) : join(evidenceRoot, platformId, randomUUID());
 }
 
+function requiredString(params: Record<string, unknown>, key: string): string {
+  const value = typeof params[key] === 'string' ? params[key].trim() : '';
+  if (!value) throw new Error(`${key} is required`);
+  return value;
+}
+
+function optionalString(params: Record<string, unknown>, key: string): string | undefined {
+  const value = typeof params[key] === 'string' ? params[key].trim() : '';
+  return value || undefined;
+}
+
+function optionalNumber(params: Record<string, unknown>, key: string): number | undefined {
+  const value = params[key];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function targetChatIds(params: Record<string, unknown>): string[] {
+  if (!Array.isArray(params.targetChatIds)) throw new Error('targetChatIds must be an array');
+  return params.targetChatIds.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean);
+}
+
 async function runSearch(params: Record<string, unknown>) {
   const platformId = String(params.platformId || '');
   const platform = getPlatform(platformId);
   const profileDir = typeof params.profileDir === 'string' ? params.profileDir.trim() : '';
   if (!profileDir) throw new Error('profileDir is required; each authorized account must use an isolated local profile');
-
   const out = outputDirectory(params, platform.id);
   const interactive = params.interactive === true;
   const query = typeof params.query === 'string' ? params.query : '';
   const timeoutMs = typeof params.timeoutMs === 'number' ? params.timeoutMs : browserTimeoutMs;
   await mkdir(out, { recursive: true });
-
-  log('info', 'browser_launch_requested', { platformId: platform.id, interactive, outputDir: out });
-  const context = await chromium.launchPersistentContext(resolve(profileDir), {
-    headless: !interactive,
-    executablePath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined,
-    viewport: { width: 1440, height: 1000 },
-    acceptDownloads: true,
-  });
-
+  log('info', 'browser_launch_requested', { platformId: platform.id, interactive, outputDir: out, correlationId: params.correlationId });
+  const context = await chromium.launchPersistentContext(resolve(profileDir), { headless: !interactive, executablePath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined, viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
   const page = await context.newPage();
   try {
     await page.goto(platform.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     const title = await page.title();
     await page.screenshot({ path: join(out, 'landing.png'), fullPage: true });
-    log('info', 'landing_page_captured', { platformId: platform.id, title });
-
-    if (interactive) {
-      return { status: 'interactive-login-opened', platform: platform.id, title, outputDir: out };
-    }
-
+    if (interactive) return { status: 'interactive-login-opened', platform: platform.id, title, outputDir: out };
     const input = await first(page, platform.selectors.search);
-    if (!input) {
-      return {
-        status: 'manual-review-required',
-        reason: 'search_selector_missing',
-        platform: platform.id,
-        landingScreenshot: join(out, 'landing.png'),
-      };
-    }
-
+    if (!input) return { status: 'manual-review-required', reason: 'search_selector_missing', platform: platform.id, landingScreenshot: join(out, 'landing.png') };
     await input.fill(query);
     await input.press('Enter');
     await page.waitForTimeout(1500);
     await page.screenshot({ path: join(out, 'results.png'), fullPage: true });
-
     const body = await page.locator('body').innerText();
     const html = await page.content();
     const text = await artifact(join(out, 'results.txt'), body);
     const source = await artifact(join(out, 'results.html'), html);
     const result = await first(page, platform.selectors.result);
     if (!result) return { status: 'no-result', platform: platform.id, artifacts: [text, source] };
-
     const href = await result.getAttribute('href');
-    if (href) {
-      await page.goto(new URL(href, platform.url).toString(), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-    }
-
+    if (href) await page.goto(new URL(href, platform.url).toString(), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.screenshot({ path: join(out, 'detail.png'), fullPage: true });
     await page.pdf({ path: join(out, 'detail.pdf'), format: 'A4', printBackground: true }).catch(() => undefined);
     const detail = await artifact(join(out, 'detail.txt'), await page.locator('body').innerText());
-    log('info', 'search_completed', { platformId: platform.id, artifactCount: 3 });
-
-    return {
-      status: 'success',
-      platform: platform.id,
-      title,
-      artifacts: [text, source, detail],
-      screenshots: [join(out, 'landing.png'), join(out, 'results.png'), join(out, 'detail.png')],
-    };
+    log('info', 'search_completed', { platformId: platform.id, artifactCount: 3, correlationId: params.correlationId });
+    return { status: 'success', platform: platform.id, title, artifacts: [text, source, detail], screenshots: [join(out, 'landing.png'), join(out, 'results.png'), join(out, 'detail.png')] };
   } catch (error: unknown) {
     const reason = redact(error instanceof Error ? error.message : String(error));
     await page.screenshot({ path: join(out, 'failure.png'), fullPage: true }).catch(() => undefined);
-    log('error', 'search_failed', { platformId: platform.id, reason });
+    log('error', 'search_failed', { platformId: platform.id, reason, correlationId: params.correlationId });
     return { status: 'manual-review-required', platform: platform.id, reason, failureScreenshot: join(out, 'failure.png') };
   } finally {
     await context.close();
   }
 }
 
+async function handleWeComTest(params: Record<string, unknown>) {
+  const result = await testWeComBot({ botId: requiredString(params, 'botId'), secret: requiredString(params, 'secret'), websocketUrl: optionalString(params, 'websocketUrl'), connectTimeoutMs: optionalNumber(params, 'connectTimeoutMs') });
+  log('info', 'wecom_bot_authenticated', { correlationId: params.correlationId });
+  return { status: 'authenticated', ...result };
+}
+
+async function handleWeComMarkdown(params: Record<string, unknown>) {
+  const result = await deliverWeComMarkdown({ botId: requiredString(params, 'botId'), secret: requiredString(params, 'secret'), websocketUrl: optionalString(params, 'websocketUrl'), connectTimeoutMs: optionalNumber(params, 'connectTimeoutMs'), targetChatIds: targetChatIds(params), markdown: requiredString(params, 'markdown') });
+  log('info', 'wecom_bot_delivery_completed', { correlationId: params.correlationId, deliveredCount: result.deliveredChatIds.length, rejectedCount: result.rejectedChatIds.length });
+  return { status: result.rejectedChatIds.length ? 'partial-success' : 'success', ...result };
+}
+
 async function handle(request: Rpc) {
-  if (request.method === 'system.ping') {
-    return { ok: true, protocol: 'ndjson-json-rpc', pid: process.pid, logLevel: activeLevel };
-  }
+  const params = request.params ?? {};
+  if (request.method === 'system.ping') return { ok: true, protocol: 'ndjson-json-rpc', pid: process.pid, logLevel: activeLevel };
   if (request.method === 'platform.healthCheck') {
-    const platform = getPlatform(String(request.params?.platformId || ''));
+    const platform = getPlatform(String(params.platformId || ''));
     return { platform: platform.id, url: platform.url, loginMode: platform.loginMode };
   }
-  if (request.method === 'platform.openLogin') return runSearch({ ...request.params, interactive: true, query: '' });
-  if (request.method === 'platform.searchAndCapture') return runSearch({ ...request.params, interactive: false });
+  if (request.method === 'platform.openLogin') return runSearch({ ...params, interactive: true, query: '' });
+  if (request.method === 'platform.searchAndCapture') return runSearch({ ...params, interactive: false });
+  if (request.method === 'wecom.bot.testConnection') return handleWeComTest(params);
+  if (request.method === 'wecom.bot.sendMarkdown') return handleWeComMarkdown(params);
   throw new Error(`unsupported method ${request.method}`);
 }
 
