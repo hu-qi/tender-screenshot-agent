@@ -1,0 +1,17 @@
+node_modules/
+dist/
+target/
+*.log
+.env
+.env.*
+!*.example
+profiles/
+evidence/
+exports/
+*.db
+*.sqlite
+*.zip
+config/providers.json
+config/platforms.json
+config/notifications.json
+apps/desktop/src-tauri/binaries/tender-sidecar*

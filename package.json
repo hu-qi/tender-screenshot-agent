@@ -1,0 +1,14 @@
+{
+  "name": "tender-screenshot-agent",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:desktop": "npm --workspace @tender/desktop run tauri dev",
+    "build:sidecar": "npm --workspace @tender/sidecar run build",
+    "typecheck": "npm -ws run typecheck",
+    "test": "npm --workspace @tender/sidecar test",
+    "secret-scan": "node scripts/secret-scan.mjs",
+    "playwright:install": "npm --workspace @tender/sidecar exec playwright install chromium"
+  }
+}
