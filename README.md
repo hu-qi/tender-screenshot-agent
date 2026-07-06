@@ -24,6 +24,9 @@
 ## Development
 
 ```bash
+cp .env.example .env
+cp config/providers.example.json config/providers.json
+cp config/platforms.example.json config/platforms.json
 npm install
 npm run playwright:install
 npm run typecheck
@@ -31,6 +34,8 @@ npm run build:sidecar
 npm run test
 npm run secret-scan
 ```
+
+`.env.example` 仅包含非敏感本地运行参数，例如 Playwright 浏览器路径、日志级别和开发目录。不要将 API Key、企业微信 Webhook、Cookie、账号密码、SMTP 密码、CA/UKey 或浏览器 Profile 写入 `.env`；这些凭证必须仅保存到系统密钥链。
 
 在公司授权网络中，先在桌面端为每个需要账号的平台完成一次人工登录；工具仅复用本机 Profile，不会保存密码、绕过验证码、CA/UKey、短信或扫码流程。
 
