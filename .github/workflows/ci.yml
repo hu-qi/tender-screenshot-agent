@@ -1,14 +1,32 @@
 name: ci
-on: [push, pull_request]
-permissions: { contents: read }
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sidecar:
+    name: Sidecar checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm install
-      - run: npm run typecheck
-      - run: npm run build:sidecar
-      - run: npm run secret-scan
+        with:
+          # Vite 8 requires a recent Node 20/22 runtime. This repository has
+          # no committed lockfile yet, so npm caching must stay disabled.
+          node-version: 22.12.0
+      - name: Install workspace dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck workspaces
+        run: npm run typecheck
+      - name: Build Playwright sidecar
+        run: npm run build:sidecar
+      - name: Scan for leaked credentials
+        run: npm run secret-scan
