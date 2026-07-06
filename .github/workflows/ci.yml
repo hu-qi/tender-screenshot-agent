@@ -19,8 +19,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Vite 8 requires a recent Node 20/22 runtime. This repository has
-          # no committed lockfile yet, so npm caching must stay disabled.
           node-version: 22.12.0
       - name: Install workspace dependencies
         run: npm install --no-audit --no-fund
@@ -38,4 +36,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Compile-check the Tauri desktop crate
-        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml 2>&1 | tee cargo-check.log
+      - name: Upload cargo diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-check-macos-log
+          path: cargo-check.log
+          if-no-files-found: error
