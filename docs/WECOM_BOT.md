@@ -6,18 +6,24 @@
 
 企业微信机器人由两份独立凭证构成：
 
-- `Bot ID`：保存到 `keychain://tender-agent/wecom-bot-id`
-- `Bot Secret`：保存到 `keychain://tender-agent/wecom-bot-secret`
+- `Bot ID`：对应 `keychain://tender-agent/wecom-bot-id`
+- `Bot Secret`：对应 `keychain://tender-agent/wecom-bot-secret`
 
 二者均按敏感凭证处理：不进入 Git、SQLite、`.env`、浏览器 Sidecar、任务导出包或日志正文。
 
-## 配置步骤
+## 当前仓库状态
+
+当前提交已完成 **配置模型、迁移边界和日志脱敏规则**，但尚未包含可启用的企业微信 Bot 发送器或系统密钥链写入界面。因此不能把 `wecom-bot.enabled` 设为 `true` 后就期待消息一定发送成功。
+
+在发送器实现前，运行时应返回 `provider-config-incomplete`，不允许回退到旧 Webhook 或伪造测试成功。
+
+## 配置准备
 
 1. 复制 `config/providers.example.json` 为本机 `config/providers.json`。
-2. 将 `wecom-bot.enabled` 设为 `true`。
-3. 通过桌面端的凭证管理页将 Bot ID 与 Bot Secret 写入系统密钥链；配置文件中只保留 `botIdCredentialRef` 与 `secretCredentialRef`。
-4. 使用企业微信后台为该机器人授予目标群/会话的消息发送权限。
-5. 在桌面端执行“通知连接测试”；测试请求和结果写入本地审计日志，但不记录凭证和完整消息正文。
+2. 保留 `wecom-bot` 的 `botIdCredentialRef` 与 `secretCredentialRef`，不要把真实值写进 JSON 或 `.env`。
+3. 由后续凭证适配器将 Bot ID、Bot Secret 写入操作系统密钥链。
+4. 由后续发送器依据企业微信机器人后台当前版本的官方文档完成鉴权、消息发送和连接测试。
+5. 在企业微信后台授予机器人目标群/会话的消息发送权限。
 
 ## 发送边界
 
@@ -28,4 +34,4 @@
 
 ## 实现约束
 
-Bot ID + Secret 的换取凭证、发送接口、请求体和权限范围必须以企业微信机器人后台当前版本的官方文档为准。由于该类接口存在版本和权限差异，运行时 Provider 不能根据猜测的 URL 或参数发送请求；未完成官方接口配置时，连接测试必须返回 `provider-config-incomplete`，而不是伪造成功。
+Bot ID + Secret 的鉴权、发送接口、请求体和权限范围必须以企业微信机器人后台当前版本的官方文档为准。由于该类接口存在版本和权限差异，运行时 Provider 不能根据猜测的 URL 或参数发送请求。
