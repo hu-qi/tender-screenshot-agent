@@ -169,7 +169,7 @@ async function clearWeCom(argv: string[]): Promise<void> {
   const { store } = openStore();
   const keychain = new MacOSKeychainStore();
   await Promise.all([keychain.delete(WECOM_BOT_ID), keychain.delete(WECOM_BOT_SECRET)]);
-  store.deletePublicSetting('wecom');
+  store.db.prepare(`DELETE FROM settings WHERE key = ?`).run('wecom');
   process.stdout.write(`${JSON.stringify({ ok: true, command: 'clear-wecom', credentialsRemoved: true, localNotificationSettingsRemoved: true }, null, 2)}\n`);
 }
 
