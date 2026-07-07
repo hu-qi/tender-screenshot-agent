@@ -8,10 +8,23 @@ export interface WeComDeliveryInput {
   websocketUrl?: string;
 }
 
-export interface WeComDeliveryResult {
-  authenticated: boolean;
+export interface WeComAuthenticationResult {
+  authenticated: true;
+  latencyMs: number;
+}
+
+export interface WeComDeliveryResult extends WeComAuthenticationResult {
   delivered: number;
   rejected: number;
+}
+
+export type WeComBotErrorCode = 'authentication-timeout' | 'authentication-failed' | 'network-failure' | 'no-targets' | 'delivery-failed';
+
+export class WeComBotError extends Error {
+  constructor(readonly code: WeComBotErrorCode, message: string) {
+    super(message);
+    this.name = 'WeComBotError';
+  }
 }
 
 type Client = {
@@ -31,8 +44,23 @@ function createClient(input: Pick<WeComDeliveryInput, 'botId' | 'botSecret' | 'w
   }) as unknown as Client;
 }
 
-async function connect(client: Client): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+function authenticationError(error: unknown): WeComBotError {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes('timeout') || message.includes('timed out')) {
+    return new WeComBotError('authentication-timeout', '企业微信 Bot 认证超时。请检查网络、企业微信长连接地址或代理设置。');
+  }
+  if (message.includes('secret') || message.includes('auth') || message.includes('credential') || message.includes('forbidden')) {
+    return new WeComBotError('authentication-failed', '企业微信 Bot 认证失败。请核对 Bot ID、Bot Secret，以及机器人是否已启用。');
+  }
+  if (message.includes('network') || message.includes('connect') || message.includes('socket') || message.includes('dns') || message.includes('econn')) {
+    return new WeComBotError('network-failure', '无法连接企业微信 Bot 长连接服务。请检查网络、代理和 WebSocket 地址。');
+  }
+  return new WeComBotError('authentication-failed', '企业微信 Bot 认证失败。请核对 Bot 配置并查看本机网络状态。');
+}
+
+async function connect(client: Client): Promise<WeComAuthenticationResult> {
+  const startedAt = Date.now();
+  return new Promise<WeComAuthenticationResult>((resolve, reject) => {
     let settled = false;
     const complete = (callback: () => void) => {
       if (settled) return;
@@ -42,32 +70,36 @@ async function connect(client: Client): Promise<void> {
       client.off?.('error', onError);
       callback();
     };
-    const onAuthenticated = () => complete(resolve);
-    const onError = (error: unknown) => complete(() => reject(error instanceof Error ? error : new Error(String(error))));
-    const timeout = setTimeout(() => complete(() => reject(new Error('WeCom Bot authentication timed out after 15 seconds'))), 15_000);
+    const onAuthenticated = () => complete(() => resolve({ authenticated: true, latencyMs: Date.now() - startedAt }));
+    const onError = (error: unknown) => complete(() => reject(authenticationError(error)));
+    const timeout = setTimeout(() => complete(() => reject(new WeComBotError('authentication-timeout', '企业微信 Bot 认证超时。请检查网络、企业微信长连接地址或代理设置。'))), 15_000);
     client.once('authenticated', onAuthenticated);
     client.once('error', onError);
-    client.connect();
+    try {
+      client.connect();
+    } catch (error) {
+      complete(() => reject(authenticationError(error)));
+    }
   });
 }
 
-export async function testWeComBot(input: Pick<WeComDeliveryInput, 'botId' | 'botSecret' | 'websocketUrl'>): Promise<void> {
+export async function testWeComBot(input: Pick<WeComDeliveryInput, 'botId' | 'botSecret' | 'websocketUrl'>): Promise<WeComAuthenticationResult> {
   const client = createClient(input);
   try {
-    await connect(client);
+    return await connect(client);
   } finally {
     client.disconnect();
   }
 }
 
 export async function sendWeComMarkdown(input: WeComDeliveryInput): Promise<WeComDeliveryResult> {
-  const targetIds = [...new Set(input.targetIds.map((value) => value.trim()).filter(Boolean))];
-  if (targetIds.length === 0) throw new Error('at least one target WeCom session ID is required');
+  const targetIds = [...new Set(input.targetIds.flatMap((value) => value.split(/[\n,;]+/)).map((value) => value.trim()).filter(Boolean))];
+  if (targetIds.length === 0) throw new WeComBotError('no-targets', '没有可发送的企业微信目标会话。请填写 chatid 或 userid 后重试。');
   const client = createClient(input);
   let delivered = 0;
   let rejected = 0;
   try {
-    await connect(client);
+    const authentication = await connect(client);
     for (const target of targetIds) {
       try {
         await client.sendMessage(target, { msgtype: 'markdown', markdown: { content: input.markdown } });
@@ -76,8 +108,8 @@ export async function sendWeComMarkdown(input: WeComDeliveryInput): Promise<WeCo
         rejected += 1;
       }
     }
-    if (delivered === 0) throw new Error('WeCom Bot rejected every configured target');
-    return { authenticated: true, delivered, rejected };
+    if (delivered === 0) throw new WeComBotError('delivery-failed', '企业微信 Bot 已认证，但所有目标会话均拒绝了消息。请确认 chatid/userid 是否正确且机器人具备主动推送权限。');
+    return { ...authentication, delivered, rejected };
   } finally {
     client.disconnect();
   }
