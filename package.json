@@ -14,6 +14,11 @@
     "typecheck": "npm -ws run typecheck",
     "test": "npm --workspace @tender/agent-host test",
     "secret-scan": "node scripts/secret-scan.mjs",
-    "playwright:install": "npm --workspace @tender/agent-host exec playwright install chromium"
+    "playwright:install": "npm --workspace @tender/agent-host exec playwright install chromium",
+    "local:config": "npm --workspace @tender/agent-host run local:config",
+    "local:config:init": "npm run local:config -- init",
+    "local:config:apply": "npm run local:config -- apply",
+    "local:config:doctor": "npm run local:config -- doctor",
+    "local:config:clear-wecom": "npm run local:config -- clear-wecom"
   }
 }
