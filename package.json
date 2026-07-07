@@ -1,14 +1,19 @@
 {
   "name": "tender-screenshot-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev:desktop": "npm --workspace @tender/desktop run tauri dev",
-    "build:sidecar": "npm --workspace @tender/sidecar run build",
+    "build:agent-host": "npm --workspace @tender/agent-host run build",
+    "dev:agent-host": "npm --workspace @tender/agent-host run dev",
+    "dev:desktop": "npm run build:agent-host && npm --workspace @tender/desktop run tauri dev",
+    "build": "npm run build:agent-host && npm --workspace @tender/desktop run build",
     "typecheck": "npm -ws run typecheck",
-    "test": "npm --workspace @tender/sidecar test",
+    "test": "npm --workspace @tender/agent-host test",
     "secret-scan": "node scripts/secret-scan.mjs",
-    "playwright:install": "npm --workspace @tender/sidecar exec playwright install chromium"
+    "playwright:install": "npm --workspace @tender/agent-host exec playwright install chromium"
   }
 }
