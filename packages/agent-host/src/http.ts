@@ -129,6 +129,7 @@ export function createAgentServer(input: {
       if (request.method === 'POST' && url.pathname === '/api/tasks') {
         const payload = await body(request) as TenderTaskInput;
         if (!payload.name?.trim() || !Array.isArray(payload.queries) || !Array.isArray(payload.platformIds)) throw new Error('invalid task input');
+        if (payload.platformIds.some((id) => !input.platforms.has(id))) throw new Error('task contains an unknown platform ID');
         return json(response, 201, input.store.createTask({
           ...payload,
           name: payload.name.trim(),
@@ -136,8 +137,9 @@ export function createAgentServer(input: {
         }));
       }
 
-      const start = url.pathname.match(/^\/api\/tasks\/([^/]+)\/runs$/);
-      if (request.method === 'POST' && start) return json(response, 202, await input.engine.start(start[1]));
+      const taskRuns = url.pathname.match(/^\/api\/tasks\/([^/]+)\/runs$/);
+      if (request.method === 'GET' && taskRuns) return json(response, 200, input.store.listRuns(taskRuns[1]));
+      if (request.method === 'POST' && taskRuns) return json(response, 202, await input.engine.start(taskRuns[1]));
       const artifacts = url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts$/);
       if (request.method === 'GET' && artifacts) return json(response, 200, input.store.listArtifacts(artifacts[1]));
       const events = url.pathname.match(/^\/api\/runs\/([^/]+)\/events$/);
