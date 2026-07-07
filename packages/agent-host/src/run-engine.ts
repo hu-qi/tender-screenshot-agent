@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Agent } from '@earendil-works/pi-agent-core';
-import { getModel } from '@earendil-works/pi-ai';
+import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { BrowserEvidenceTool } from './browser.js';
 import type { HostConfig } from './config.js';
@@ -89,12 +89,16 @@ export class RunEngine {
 
   private async executeWithPi(task: TenderTask, run: TenderRun, tool: AgentTool<any>): Promise<PlatformOutcome[]> {
     const provider = process.env.TENDER_LLM_PROVIDER!;
-    const model = process.env.TENDER_LLM_MODEL!;
+    const modelId = process.env.TENDER_LLM_MODEL!;
+    const models = builtinModels();
+    const model = models.getModel(provider, modelId);
+    if (!model) throw new Error(`Pi model is not available: ${provider}/${modelId}`);
+
     const outcomes: PlatformOutcome[] = [];
     const agent = new Agent({
       initialState: {
         systemPrompt: 'You orchestrate lawful tender evidence collection. Call search_platform only for requested pairs. Never bypass login, CAPTCHA, SMS, QR, CA, or UKey controls.',
-        model: getModel(provider as any, model),
+        model,
         tools: [tool],
         messages: [],
       },
@@ -111,7 +115,9 @@ export class RunEngine {
         return undefined;
       },
     });
-    agent.subscribe(async (event) => this.events.emit(run.id, `pi.${event.type}`, 'info', { correlationId: run.correlationId }));
+    agent.subscribe(async (event) => {
+      this.events.emit(run.id, `pi.${event.type}`, 'info', { correlationId: run.correlationId });
+    });
     const pairs = task.queries.flatMap((query) => task.platformIds.map((platformId) => ({ platformId, query })));
     await agent.prompt(`Collect evidence for exactly these pairs: ${JSON.stringify(pairs)}`);
     return outcomes;
@@ -121,10 +127,16 @@ export class RunEngine {
     const setting = this.store.getPublicSetting<{ enabled: boolean; targetIds: string[]; websocketUrl?: string }>('wecom');
     if (!setting?.value.enabled || task.privacyMode === 'strict-local') return;
     const [botId, botSecret] = await Promise.all([this.keychain.get(WECOM_BOT_ID), this.keychain.get(WECOM_BOT_SECRET)]);
-    if (!botId || !botSecret) return this.events.emit(run.id, 'notification.skipped', 'warn', { reason: 'wecom credential missing', correlationId: run.correlationId });
+    if (!botId || !botSecret) {
+      this.events.emit(run.id, 'notification.skipped', 'warn', { reason: 'wecom credential missing', correlationId: run.correlationId });
+      return;
+    }
     const markdown = `**标讯截图助手**\n任务：${task.name}\n状态：${status}\n成功：${summary.successful}\n人工复核：${summary.manualReview}\n失败：${summary.failed}`;
     const allowed = this.policy.canSendNotification(task.privacyMode, markdown);
-    if (!allowed.allow) return this.events.emit(run.id, 'policy.notification.blocked', 'warn', { reason: allowed.reason, correlationId: run.correlationId });
+    if (!allowed.allow) {
+      this.events.emit(run.id, 'policy.notification.blocked', 'warn', { reason: allowed.reason, correlationId: run.correlationId });
+      return;
+    }
     const result = await sendWeComMarkdown({ botId, botSecret, targetIds: setting.value.targetIds, websocketUrl: setting.value.websocketUrl, markdown });
     this.events.emit(run.id, 'notification.sent', 'info', { delivered: result.delivered, rejected: result.rejected, correlationId: run.correlationId });
   }
