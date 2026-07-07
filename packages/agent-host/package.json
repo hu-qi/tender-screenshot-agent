@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test test/*.test.mjs",
+    "local:config": "npm run build && node dist/security-cli.js",
     "explore:qwebbridge": "npm run build && node dist/explore-cli.js"
   },
   "dependencies": {
