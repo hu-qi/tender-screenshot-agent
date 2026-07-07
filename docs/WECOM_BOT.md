@@ -1,58 +1,48 @@
-# 企业微信机器人接入
+# 企业微信智能机器人接入
 
-本项目的新部署使用 `wecom-bot-id-secret`，通过企业微信智能机器人 WebSocket 通道认证和主动推送；不再把群机器人 Webhook 作为默认方案。
+新运行时使用 `wecom-bot-id-secret`：Pi Agent Host 直接调用企业微信官方 `@wecom/aibot-node-sdk` 建立 WebSocket 认证与主动 Markdown 推送。旧群机器人 Webhook 不是默认通道，也没有作为回退发送逻辑。
 
-## 已实现链路
+## 运行链路
 
-1. 桌面端接收 Bot ID、Bot Secret、目标会话 ID 与可选私有部署 WebSocket 地址。
-2. Bot ID 与 Bot Secret 分别写入操作系统 Keychain，SQLite 只保存启用状态、目标会话 ID、WebSocket 地址和更新时间。
-3. 用户点击“测试认证”或系统发送通知时，Rust Core 从 Keychain 读取凭证，启动一次性 Node Sidecar，并通过 stdin 发送私有 JSON-RPC 请求。
-4. Sidecar 使用企业微信官方 `@wecom/aibot-node-sdk` 的 `WSClient`：以 `botId + secret` 建立 WebSocket 连接、等待 `authenticated` 事件、调用 `sendMessage(chatid, { msgtype: 'markdown', ... })` 主动推送，随后断开。
-5. 审计日志只记录认证/发送结果、关联 ID、成功与拒绝数量；Bot ID、Secret、完整 Markdown 内容和原始会话 ID 不写入日志。
+1. 桌面端将 Bot ID、Bot Secret、目标会话 ID 提交给本机 Agent Host。
+2. Agent Host 将 Bot ID 与 Bot Secret 分别写入 macOS Keychain；SQLite 只保存启用状态、目标会话 ID、可选 WebSocket 地址和更新时间。
+3. 点击“测试认证”时，Host 从 Keychain 读取凭证，使用官方 SDK `WSClient({ botId, secret })` 建立 WebSocket，并等待 `authenticated` 事件。
+4. 任务终态或手动测试通知时，Host 调用 `sendMessage(targetId, { msgtype: 'markdown', markdown: { content } })`，完成后断开连接。
+5. append-only 运行事件只记录认证/发送状态、关联 ID 和成功/失败数量；不保存 Bot ID、Secret、完整消息正文或原始目标会话 ID。
 
-浏览器 Playwright Sidecar不持有企业微信凭证；通知 Sidecar 仅在单次请求的进程内保存凭证，并在发送结束后退出。
+浏览器执行和企业微信通知都在同一个本地 Agent Host 内，但属于不同工具。Playwright 工具不会读取 Bot 凭证。
 
 ## 凭证模型
 
-- `Bot ID`：OS Keychain account `wecom-bot-id`
-- `Bot Secret`：OS Keychain account `wecom-bot-secret`
 - Keychain service：`com.huqi.tender-screenshot-agent`
+- Bot ID account：`wecom-bot-id`
+- Bot Secret account：`wecom-bot-secret`
 
-二者均不进入 Git、SQLite、`.env`、浏览器 Profile、任务导出包或日志正文。
+Bot ID、Bot Secret 不进入 Git、SQLite、`.env`、浏览器 Profile、导出包或日志正文。
 
 ## 目标会话
 
-SDK 的 `sendMessage(chatid, body)` 支持向指定会话主动推送。标讯助手将目标值作为 `targetChatIds` 保存；每行一个，可按企业微信后台实际可用的群聊 `chatid` 或单聊 `userid` 配置。发送结果只返回脱敏后的尾部标识。
+目标会话每行一个。实际可用值取决于企业微信机器人后台授权范围，例如群聊 `chatid` 或单聊 `userid`。Agent Host 保存去重后的目标列表；发送结果仅记录成功/拒绝总数。
 
-## 开发环境启动要求
+## 本地启动
 
 ```bash
 npm install
-npm run build:sidecar
+npm run build:agent-host
+npm run dev:desktop
 ```
 
-桌面端开发模式默认执行：
+开发桌面壳会启动：
 
 ```text
-node packages/sidecar/dist/server.js
+node packages/agent-host/dist/index.js --port <random> --token <per-launch-token>
 ```
 
-也可以设置：
-
-```text
-TENDER_NODE_BIN=/path/to/node
-TENDER_SIDECAR_SCRIPT=/absolute/path/to/packages/sidecar/dist/server.js
-```
-
-发布包环境可设置 `TENDER_SIDECAR_BIN`，由打包后的独立 Sidecar 二进制代替本机 Node。未找到 Sidecar 时，桌面端会返回明确错误，不会伪造通知成功。
+发布版本可通过 `TENDER_AGENT_HOST_BIN` 指定打包后的 Host 二进制；开发调试可通过 `TENDER_AGENT_HOST_SCRIPT` 或 `TENDER_NODE_BIN` 覆盖启动位置。
 
 ## 发送边界
 
-- 只发送任务状态、命中数量、失败分类和本地证据包标识。
-- 默认不发送截图、HTML、PDF、浏览器 Profile、Cookie、绝对本地路径或完整敏感公告内容。
-- 任务失败、需要人工登录、验证码/CA/UKey 介入时才发送高优先级提醒。
-- 旧 `wecom-group-webhook-legacy` 配置仅为已有部署迁移保留，默认禁用。
-
-## 实现约束
-
-Bot ID + Secret 的鉴权、发送接口和消息体均通过官方 Node SDK 实现，而非手写猜测 HTTP URL。SDK 和插件版本升级时，需要重新执行 `npm install`、`npm run typecheck` 与企业微信真实会话发送验收。
+- 默认发送任务状态、成功数、人工复核数和失败数。
+- 不发送截图、HTML、PDF、浏览器 Profile、Cookie、绝对本地路径或完整敏感公告内容。
+- `strict-local` 模式禁止外发企业微信通知。
+- 未配置 Bot 凭证、目标会话或 Host 网络异常时，事件流记录明确的跳过/失败原因，不会伪造发送成功。
