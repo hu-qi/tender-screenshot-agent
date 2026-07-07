@@ -1,46 +1,59 @@
 # 标讯截图助手 / Tender Screenshot Agent
 
-本地可安装的标讯监控 Agent：用户输入项目名称后，工具在本机访问 9 个平台、保存公告截图和 HTML/PDF/Text/Trace 证据，并可将脱敏任务状态推送到企业微信机器人。
+本地安装的标讯监控 Agent：输入项目名称后，系统在本机访问指定标讯平台、保留截图与 HTML/PDF/Text/Trace 证据，并可将脱敏任务状态推送给企业微信智能机器人。
 
-> 原始截图、HTML、PDF、浏览器登录态、任务数据库和模型密钥默认仅保存在本机。仓库不包含账号、Cookie、API Key、Bot ID、Bot Secret、Webhook 或邮件密码。
+> 截图、HTML、PDF、浏览器登录态、SQLite 数据库和凭证默认只存在本机。仓库不包含账号、Cookie、API Key、Bot ID、Bot Secret、Webhook 或邮件密码。
 
-## Architecture
+## Runtime
 
-- **Desktop:** Tauri 2 + Rust + React
-- **Browser engine:** Node.js + Playwright Sidecar，通过 NDJSON JSON-RPC 通信
-- **Local state:** SQLite / 本地证据目录 / OS Keychain
-- **AI providers:** OpenAI-compatible LLM、OCR-VL 与可选文件网关
-- **Notification:** 企业微信机器人 Bot ID + Bot Secret；旧群机器人 Webhook 仅作默认禁用的迁移兼容
+```text
+Tauri desktop shell
+  └─ local Pi Agent Host (127.0.0.1 + per-launch bearer token)
+       ├─ Pi Agent Core: state, tools, lifecycle events
+       ├─ Playwright: platform access and evidence capture
+       ├─ SQLite: tasks, runs, append-only events, artifact index
+       ├─ macOS Keychain: Bot ID / Bot Secret
+       └─ WeCom AI Bot SDK: WebSocket authentication and notification
+```
 
-## Included runtime paths
+Tauri no longer owns task state, evidence persistence, notification state, credential logic, or a Node JSON-RPC Sidecar. It only starts the Host and renders the desktop UI.
 
-- 每个授权账号使用独立 Playwright persistent profile。
-- 交互式登录、会话验证、登录失效、验证码和人工复核状态。
-- 浏览器打开、搜索、列表/详情截图、DOM 文本、HTML、PDF、失败截图和 Playwright Trace。
-- 严格本地、内网增强和混合隐私模式。
-- Provider 配置、调用审计、日志关联 ID 和企业微信 Bot 凭证模型。
-- 9 个平台的配置化入口、访问策略和 selector 录制位置。
+## Execution modes
+
+- **Deterministic default:** runs every `query × platform` pair in order. Tender collection must be exhaustive, so baseline execution does not depend on LLM planning.
+- **Pi orchestration:** enabled only when both `TENDER_LLM_PROVIDER` and `TENDER_LLM_MODEL` are configured. Pi Agent Core receives the same real tools and the same policy gate for planning, relevance decisions and summarization.
+
+## Tool boundary
+
+`search_platform` is one shared tool used by both modes. Before any tool side effect, the access policy checks platform mode and lawful local profile availability.
+
+- `public`: may be accessed without a local account profile.
+- `manual-login`: requires a local persistent browser profile created through lawful interactive login.
+- `ca-login`: routed to manual review; the application does not bypass CA/UKey, QR, SMS or CAPTCHA.
+
+Every adapter is explicitly either:
+
+- `unverified`: captures landing-page screenshot/HTML/trace, then returns `manual-review-required`.
+- `verified`: has recorded selectors and may submit a real query and capture list/detail evidence.
+
+This prevents generic selectors from being represented as a validated integration.
 
 ## Development
 
 ```bash
 cp .env.example .env
-cp config/providers.example.json config/providers.json
 cp config/platforms.example.json config/platforms.json
 npm install
 npm run playwright:install
 npm run typecheck
-npm run build:sidecar
-npm run test
-npm run secret-scan
+npm run build:agent-host
+npm run dev:desktop
 ```
 
-`.env.example` 仅包含非敏感本地运行参数，例如 Playwright 浏览器路径、日志级别和开发目录。不要将 API Key、企业微信 Bot ID、Bot Secret、旧 Webhook、Cookie、账号密码、SMTP 密码、CA/UKey 或浏览器 Profile 写入 `.env`；这些凭证必须仅保存到系统密钥链。
+`.env` only contains local runtime parameters such as a browser path, data location and log level. Do not put API keys, Bot credentials, browser cookies, passwords, SMTP passwords, CA/UKey material or a Webhook URL in `.env`.
 
-企业微信 Bot 接入说明见 [docs/WECOM_BOT.md](docs/WECOM_BOT.md)。Bot ID + Secret 的认证与发送接口必须以企业微信机器人后台当前版本的官方文档为准；在未完成官方接口配置前，Provider 不得伪造发送成功。
+On macOS, Bot ID and Bot Secret are stored through Keychain. The browser profile is local to the Agent Host data directory.
 
-在公司授权网络中，先在桌面端为每个需要账号的平台完成一次人工登录；工具仅复用本机 Profile，不会保存密码、绕过验证码、CA/UKey、短信或扫码流程。
+## Verification boundary
 
-## Important acceptance boundary
-
-公开入口、平台结构和登录机制会变化。真实 selector、分页、检索条件、验证码和 CA/UKey 流程必须在公司授权网络与合法账号下逐平台录制验收；本仓库不会伪造“已完成真实平台验证”。详见 [docs/VERIFICATION_STATUS.md](docs/VERIFICATION_STATUS.md)。
+The repository contains a real Host, tool registry, evidence capture path, policy gate and WeCom SDK integration. It does **not** claim that all nine platforms have verified DOM selectors, lawful login flows, CAPTCHA handling, CA/UKey behavior or stable pagination. Those must be recorded and accepted one platform at a time in the authorized company environment.
