@@ -68,8 +68,8 @@ export function createAgentServer(input: {
       const openLogin = url.pathname.match(/^\/api\/platforms\/([^/]+)\/login$/);
       if (request.method === 'POST' && openLogin) {
         const platform = getPlatform(openLogin[1]);
-        const session = await input.loginManager.open(platform);
         const profile = input.store.getPlatformProfile(platform.id, input.loginManager.profileDir(platform.id));
+        const session = await input.loginManager.open(platform, profile.status);
         input.store.setPlatformProfile({
           platformId: platform.id,
           status: 'login-open',
@@ -98,8 +98,18 @@ export function createAgentServer(input: {
 
       const cancelLogin = url.pathname.match(/^\/api\/platform-logins\/([^/]+)\/cancel$/);
       if (request.method === 'POST' && cancelLogin) {
-        await input.loginManager.cancel(cancelLogin[1]);
-        return json(response, 204, {});
+        const cancelled = await input.loginManager.cancel(cancelLogin[1]);
+        if (!cancelled) return json(response, 200, { cancelled: false });
+        const existing = input.store.getPlatformProfile(cancelled.session.platformId, input.loginManager.profileDir(cancelled.session.platformId));
+        input.store.setPlatformProfile({
+          platformId: cancelled.session.platformId,
+          status: cancelled.previousStatus,
+          profileDir: input.loginManager.profileDir(cancelled.session.platformId),
+          lastLoginAt: existing.lastLoginAt,
+          lastValidatedAt: existing.lastValidatedAt,
+          message: 'interactive login was cancelled by user',
+        });
+        return json(response, 200, { cancelled: true });
       }
 
       const clearProfile = url.pathname.match(/^\/api\/platforms\/([^/]+)\/profile$/);
