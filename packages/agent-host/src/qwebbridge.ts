@@ -105,7 +105,8 @@ const DISCOVERY_SCRIPT = String.raw`
     .replace(/\b(?:\+?86[- ]?)?1[3-9]\d{9}\b/g, '[REDACTED_PHONE]')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]')
     .slice(0, 80);
-  const stable = (value) => value && value.length < 100 && !/[0-9a-f]{8,}/i.test(value) && !/^(css-|jsx-|ant-|el-)/.test(value);
+  const sensitive = (value) => /(?:token|secret|cookie|auth(?:orization)?|password|passwd|phone|mobile|email|idcard|identity|身份证|手机号|邮箱|密码)/i.test(String(value || ''));
+  const stable = (value) => value && value.length < 100 && !/[0-9a-f]{8,}/i.test(value) && !/^(css-|jsx-|ant-|el-)/.test(value) && !sensitive(value);
   const escape = (value) => CSS.escape(String(value));
   const unique = (selector) => {
     try { return document.querySelectorAll(selector).length === 1; } catch { return false; }
@@ -119,11 +120,11 @@ const DISCOVERY_SCRIPT = String.raw`
     const placeholder = el.getAttribute('placeholder');
     const classes = [...el.classList].filter(stable).slice(0, 2);
     const options = [];
-    if (dataTest) options.push('[data-testid="' + escape(dataTest) + '"]');
-    if (id && stable(id)) options.push('#' + escape(id));
-    if (name) options.push(tag + '[name="' + escape(name) + '"]');
-    if (aria) options.push(tag + '[aria-label="' + escape(aria) + '"]');
-    if (placeholder) options.push(tag + '[placeholder="' + escape(placeholder) + '"]');
+    if (stable(dataTest)) options.push('[data-testid="' + escape(dataTest) + '"]');
+    if (stable(id)) options.push('#' + escape(id));
+    if (stable(name)) options.push(tag + '[name="' + escape(name) + '"]');
+    if (stable(aria)) options.push(tag + '[aria-label="' + escape(aria) + '"]');
+    if (stable(placeholder)) options.push(tag + '[placeholder="' + escape(placeholder) + '"]');
     if (classes.length) options.push(tag + '.' + classes.map(escape).join('.'));
     const selector = options.find(unique) || options[0] || tag;
     const rect = el.getBoundingClientRect();
