@@ -96,13 +96,12 @@ fn agent_host_config(state: State<AgentHostState>) -> AgentHostConfig {
 }
 
 fn stop_agent_host(app: &tauri::AppHandle) {
-    let process = {
-        let state = app.state::<AgentHostState>();
-        match state.child.lock() {
-            Ok(mut child) => child.take(),
-            Err(_) => None,
-        }
+    let state = app.state::<AgentHostState>();
+    let process = match state.child.lock() {
+        Ok(mut child) => child.take(),
+        Err(_) => None,
     };
+    drop(state);
     if let Some(mut process) = process {
         let _ = process.kill();
         let _ = process.wait();
