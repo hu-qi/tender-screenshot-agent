@@ -51,7 +51,7 @@ TENDER_CONFIG_DIR=
 TENDER_PLATFORM_CONFIG=
 ```
 
-`TENDER_WECOM_TARGET_IDS` 可用逗号、分号或换行分隔。Bot ID 与 Bot Secret 必须同时存在；只填其中一个会被拒绝。
+`TENDER_WECOM_TARGET_IDS` 可用逗号或分号分隔。Bot ID 与 Bot Secret 必须同时存在；只填其中一个会被拒绝。
 
 ## 应用配置
 
