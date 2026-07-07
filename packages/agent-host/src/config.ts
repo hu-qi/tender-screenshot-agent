@@ -10,7 +10,7 @@ const defaults: PlatformAdapterConfig[] = [
   ['tower-eprocurement', '中国铁塔电子采购平台', 'https://ebid.chinatowercom.cn/', 'ca-login'],
   ['cebpubservice', '中国招标投标公共服务平台', 'https://bulletin.cebpubservice.com/', 'public'],
   ['miit', '工信部通信工程建设项目招标投标管理信息平台', 'https://txzbqy.miit.gov.cn/', 'manual-login'],
-  ['gd-govprocurement', '广东省政府采购网', 'https://ygp.gdzwfw.gov.cn/', 'public'],
+  ['gd-govprocurement', '广东省政府采购网', 'https://gdgpo.czt.gd.gov.cn/', 'public'],
   ['gd-public-resources', '广东省公共资源交易平台', 'https://ygp.gdzwfw.gov.cn/', 'public'],
 ].map(([id, name, entryUrl, accessMode]) => ({ id: id as PlatformId, name, entryUrl, accessMode: accessMode as PlatformAdapterConfig['accessMode'], adapterStatus: 'unverified' }));
 
