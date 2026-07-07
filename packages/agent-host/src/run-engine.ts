@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
@@ -37,8 +36,8 @@ export class RunEngine {
 
   private hasAuthorizedProfile(platform: PlatformAdapterConfig): boolean {
     if (platform.accessMode === 'public') return true;
-    const profile = join(this.config.profilesDir, platform.id, 'default');
-    return existsSync(join(profile, 'Local State')) || existsSync(join(profile, 'Default'));
+    const profileDir = join(this.config.profilesDir, platform.id, 'default');
+    return this.store.getPlatformProfile(platform.id, profileDir).status === 'user-confirmed';
   }
 
   private async execute(task: TenderTask, run: TenderRun): Promise<void> {
@@ -90,8 +89,7 @@ export class RunEngine {
   private async executeWithPi(task: TenderTask, run: TenderRun, tool: AgentTool<any>): Promise<PlatformOutcome[]> {
     const provider = process.env.TENDER_LLM_PROVIDER!;
     const modelId = process.env.TENDER_LLM_MODEL!;
-    const models = builtinModels();
-    const model = models.getModel(provider, modelId);
+    const model = builtinModels().getModel(provider, modelId);
     if (!model) throw new Error(`Pi model is not available: ${provider}/${modelId}`);
 
     const outcomes: PlatformOutcome[] = [];
