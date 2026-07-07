@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { ArtifactRecord, PlatformAdapterConfig, PlatformOutcome } from './domain.js';
@@ -27,7 +27,7 @@ export class BrowserEvidenceTool {
     content?: Buffer | string,
   ): Promise<ArtifactRecord> {
     if (content !== undefined) await writeFile(absolutePath, content);
-    const buffer = content === undefined ? await import('node:fs/promises').then(({ readFile }) => readFile(absolutePath)) : Buffer.from(content);
+    const buffer = content === undefined ? await readFile(absolutePath) : Buffer.from(content);
     return this.store.addArtifact({
       runId,
       platformId,
@@ -59,6 +59,12 @@ export class BrowserEvidenceTool {
       acceptDownloads: true,
     });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+    let traceStopped = false;
+    const stopTrace = async (path?: string) => {
+      if (traceStopped) return;
+      traceStopped = true;
+      await context.tracing.stop(path ? { path } : undefined);
+    };
     const artifacts: ArtifactRecord[] = [];
     const page = await context.newPage();
 
@@ -72,7 +78,7 @@ export class BrowserEvidenceTool {
 
       if (platform.adapterStatus !== 'verified') {
         const tracePath = join(outputDir, 'manual-review-trace.zip');
-        await context.tracing.stop({ path: tracePath });
+        await stopTrace(tracePath);
         artifacts.push(await this.writeArtifact(runId, platform.id, 'trace', tracePath));
         onProgress('browser.adapter.unverified', 'warn', { platformId: platform.id, query });
         return { platformId: platform.id, status: 'manual-review-required', reason: 'platform adapter selectors are not recorded and accepted yet', artifacts };
@@ -81,6 +87,9 @@ export class BrowserEvidenceTool {
       const searchInput = platform.selectors?.searchInput;
       const resultLink = platform.selectors?.resultLink;
       if (!searchInput || !resultLink) {
+        const tracePath = join(outputDir, 'adapter-config-trace.zip');
+        await stopTrace(tracePath);
+        artifacts.push(await this.writeArtifact(runId, platform.id, 'trace', tracePath));
         return { platformId: platform.id, status: 'manual-review-required', reason: 'verified adapter is missing mandatory search/result selectors', artifacts };
       }
 
@@ -92,7 +101,11 @@ export class BrowserEvidenceTool {
       await page.screenshot({ path: resultPath, fullPage: true });
       artifacts.push(await this.writeArtifact(runId, platform.id, 'result-screenshot', resultPath));
       const firstResult = page.locator(resultLink).first();
-      if (await firstResult.count() === 0) return { platformId: platform.id, status: 'no-result', artifacts };
+      if (await firstResult.count() === 0) {
+        await stopTrace();
+        onProgress('browser.no_result', 'info', { platformId: platform.id, query });
+        return { platformId: platform.id, status: 'no-result', artifacts };
+      }
       const href = await firstResult.getAttribute('href');
       if (href) await page.goto(new URL(href, platform.entryUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 45_000 });
       const detailPath = join(outputDir, 'detail.png');
@@ -103,7 +116,7 @@ export class BrowserEvidenceTool {
       const pdfPath = join(outputDir, 'detail.pdf');
       await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
       artifacts.push(await this.writeArtifact(runId, platform.id, 'pdf', pdfPath));
-      await context.tracing.stop();
+      await stopTrace();
       onProgress('browser.capture.completed', 'info', { platformId: platform.id, artifactCount: artifacts.length });
       return { platformId: platform.id, status: 'success', artifacts };
     } catch (error) {
@@ -111,12 +124,13 @@ export class BrowserEvidenceTool {
       await page.screenshot({ path: failurePath, fullPage: true }).catch(() => undefined);
       if (existsSync(failurePath)) artifacts.push(await this.writeArtifact(runId, platform.id, 'failure-screenshot', failurePath));
       const tracePath = join(outputDir, 'failure-trace.zip');
-      await context.tracing.stop({ path: tracePath }).catch(() => undefined);
+      await stopTrace(tracePath).catch(() => undefined);
       if (existsSync(tracePath)) artifacts.push(await this.writeArtifact(runId, platform.id, 'trace', tracePath));
       const reason = error instanceof Error ? error.message : String(error);
       onProgress('browser.capture.failed', 'error', { platformId: platform.id, reason });
       return { platformId: platform.id, status: 'failed', reason, artifacts };
     } finally {
+      await stopTrace().catch(() => undefined);
       await context.close();
     }
   }
