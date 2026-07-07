@@ -8,6 +8,7 @@ export type QWebBridgeTool =
   | 'screenshot'
   | 'click'
   | 'fill'
+  | 'evaluate'
   | 'wait_for'
   | 'network'
   | 'find_tab'
