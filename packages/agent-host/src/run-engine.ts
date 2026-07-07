@@ -114,6 +114,7 @@ export class RunEngine {
     const pairs = this.requestedPairs(task);
     const allowedPairs = new Set(pairs.map((pair) => `${pair.platformId}\u0000${pair.query}`));
     const startedPairs = new Set<string>();
+    const completedPairs = new Set<string>();
     let modelTurns = 0;
     const agent = new Agent({
       initialState: {
@@ -141,7 +142,9 @@ export class RunEngine {
         startedPairs.add(key);
         return undefined;
       },
-      afterToolCall: async ({ result }) => {
+      afterToolCall: async ({ args, result }) => {
+        const input = args as { platformId?: string; query?: string };
+        completedPairs.add(`${input.platformId || ''}\u0000${input.query || ''}`);
         const outcome = result.details as PlatformOutcome | undefined;
         if (outcome?.platformId) outcomes.push(outcome);
         return undefined;
@@ -165,7 +168,7 @@ export class RunEngine {
       this.events.emit(run.id, 'model.orchestration.failed', 'warn', { reason: error instanceof Error ? error.message : String(error), correlationId: run.correlationId });
     }
 
-    const missing = pairs.filter((pair) => !startedPairs.has(`${pair.platformId}\u0000${pair.query}`));
+    const missing = pairs.filter((pair) => !completedPairs.has(`${pair.platformId}\u0000${pair.query}`));
     if (missing.length > 0) {
       this.events.emit(run.id, 'model.deterministic.fallback', 'warn', { missingPairs: missing.length, correlationId: run.correlationId });
       outcomes.push(...await this.executePairs(task, run, tool, missing));
