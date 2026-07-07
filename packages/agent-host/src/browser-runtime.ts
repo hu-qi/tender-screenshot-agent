@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { chromium, type BrowserContext, type LaunchPersistentContextOptions } from 'playwright';
+import { chromium, type BrowserContext } from 'playwright';
 import type { HostConfig } from './config.js';
 
 const require = createRequire(import.meta.url);
+type PersistentContextOptions = NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
 
 export type BrowserRuntimeSource = 'configured' | 'playwright' | 'system-chrome' | 'missing';
 
@@ -106,7 +107,7 @@ export class BrowserRuntimeManager {
     return status;
   }
 
-  async launchPersistentContext(userDataDir: string, options: Omit<LaunchPersistentContextOptions, 'executablePath'>): Promise<BrowserContext> {
+  async launchPersistentContext(userDataDir: string, options: Omit<PersistentContextOptions, 'executablePath'>): Promise<BrowserContext> {
     const runtime = this.requireReady();
     return chromium.launchPersistentContext(userDataDir, {
       ...options,
