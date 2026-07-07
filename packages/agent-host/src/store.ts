@@ -84,14 +84,7 @@ export class TenderStore {
     const now = timestamp();
     const task: TenderTask = { ...input, id: randomUUID(), status: 'queued', createdAt: now, updatedAt: now };
     this.db.prepare(`INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      task.id,
-      task.name,
-      JSON.stringify(task.queries),
-      JSON.stringify(task.platformIds),
-      task.privacyMode,
-      task.status,
-      task.createdAt,
-      task.updatedAt,
+      task.id, task.name, JSON.stringify(task.queries), JSON.stringify(task.platformIds), task.privacyMode, task.status, task.createdAt, task.updatedAt,
     );
     return task;
   }
@@ -129,6 +122,28 @@ export class TenderStore {
     return run;
   }
 
+  listRuns(taskId: string): TenderRun[] {
+    const rows = this.db.prepare(`SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC`).all(taskId) as Array<Record<string, string | null>>;
+    return rows.map((row) => this.runFromRow(row));
+  }
+
+  getRun(runId: string): TenderRun | undefined {
+    const row = this.db.prepare(`SELECT * FROM runs WHERE id = ?`).get(runId) as Record<string, string | null> | undefined;
+    return row ? this.runFromRow(row) : undefined;
+  }
+
+  private runFromRow(row: Record<string, string | null>): TenderRun {
+    return {
+      id: String(row.id),
+      taskId: String(row.task_id),
+      status: String(row.status) as TenderRun['status'],
+      correlationId: String(row.correlation_id),
+      startedAt: String(row.started_at),
+      finishedAt: row.finished_at || undefined,
+      summary: row.summary_json ? JSON.parse(row.summary_json) as RunSummary : undefined,
+    };
+  }
+
   finishRun(runId: string, status: TenderRun['status'], summary: RunSummary): void {
     this.db.prepare(`UPDATE runs SET status = ?, finished_at = ?, summary_json = ? WHERE id = ?`).run(status, timestamp(), JSON.stringify(summary), runId);
   }
@@ -137,12 +152,7 @@ export class TenderStore {
     const next = this.db.prepare(`SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM events WHERE run_id = ?`).get(runId) as { sequence: number };
     const record = { runId, sequence: next.sequence, timestamp: timestamp(), type, level, payload };
     const result = this.db.prepare(`INSERT INTO events(run_id, sequence, timestamp, type, level, payload_json) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      record.runId,
-      record.sequence,
-      record.timestamp,
-      record.type,
-      record.level,
-      JSON.stringify(record.payload),
+      record.runId, record.sequence, record.timestamp, record.type, record.level, JSON.stringify(record.payload),
     );
     return { id: Number(result.lastInsertRowid), ...record };
   }
@@ -163,13 +173,7 @@ export class TenderStore {
   addArtifact(artifact: Omit<ArtifactRecord, 'id' | 'createdAt'>): ArtifactRecord {
     const record: ArtifactRecord = { id: randomUUID(), createdAt: timestamp(), ...artifact };
     this.db.prepare(`INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-      record.id,
-      record.runId,
-      record.platformId,
-      record.kind,
-      record.relativePath,
-      record.sha256,
-      record.createdAt,
+      record.id, record.runId, record.platformId, record.kind, record.relativePath, record.sha256, record.createdAt,
     );
     return record;
   }
@@ -189,9 +193,7 @@ export class TenderStore {
 
   getPlatformProfile(platformId: PlatformId, profileDir: string): PlatformProfile {
     const row = this.db.prepare(`SELECT * FROM platform_profiles WHERE platform_id = ?`).get(platformId) as Record<string, string> | undefined;
-    if (!row) {
-      return { platformId, status: 'not-configured', profileDir, updatedAt: '' };
-    }
+    if (!row) return { platformId, status: 'not-configured', profileDir, updatedAt: '' };
     return {
       platformId: row.platform_id as PlatformId,
       status: row.status as PlatformProfileStatus,
@@ -216,13 +218,7 @@ export class TenderStore {
         last_validated_at=excluded.last_validated_at,
         message=excluded.message
     `).run(
-      input.platformId,
-      input.status,
-      input.profileDir,
-      updatedAt,
-      input.lastLoginAt || null,
-      input.lastValidatedAt || null,
-      input.message || null,
+      input.platformId, input.status, input.profileDir, updatedAt, input.lastLoginAt || null, input.lastValidatedAt || null, input.message || null,
     );
     return { ...input, updatedAt };
   }
