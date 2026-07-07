@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AgentHostClient, type PlatformAccess, type Task, type WeComStatus } from './agent-host';
+import { AgentHostClient, type Artifact, type PlatformAccess, type Run, type RunEvent, type Task, type WeComStatus } from './agent-host';
 import './style.css';
 
 const host = new AgentHostClient();
@@ -11,6 +11,9 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [platforms, setPlatforms] = useState<PlatformAccess[]>([]);
   const [loginSessions, setLoginSessions] = useState<Record<string, string>>({});
+  const [activeRun, setActiveRun] = useState<Run | null>(null);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [name, setName] = useState('');
   const [queries, setQueries] = useState('');
   const [privacyMode, setPrivacyMode] = useState('internal-enhanced');
@@ -34,6 +37,24 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!activeRun) return;
+    let available = true;
+    const refreshRun = async () => {
+      try {
+        const [events, nextArtifacts] = await Promise.all([host.listEvents(activeRun.id), host.listArtifacts(activeRun.id)]);
+        if (!available) return;
+        setRunEvents(events);
+        setArtifacts(nextArtifacts);
+      } catch (error) {
+        if (available) setNotice(`读取运行日志失败：${asText(error)}`);
+      }
+    };
+    void refreshRun();
+    const timer = window.setInterval(() => { void refreshRun(); }, 1200);
+    return () => { available = false; window.clearInterval(timer); };
+  }, [activeRun?.id]);
+
   const createTask = async () => {
     if (!name.trim() || parsedQueries.length === 0) return setNotice('请填写任务名称和至少一个查询名称。');
     try {
@@ -44,8 +65,23 @@ function App() {
   };
 
   const startTask = async (taskId: string) => {
-    try { await host.startRun(taskId); await refresh(); setNotice('任务已交给 Agent Host 执行。'); }
-    catch (error) { setNotice(`启动任务失败：${asText(error)}`); }
+    try {
+      const run = await host.startRun(taskId);
+      setActiveRun(run);
+      setRunEvents([]);
+      setArtifacts([]);
+      await refresh();
+      setNotice(`任务已交给 Agent Host 执行，运行 ID：${run.id}`);
+    } catch (error) { setNotice(`启动任务失败：${asText(error)}`); }
+  };
+
+  const showLatestRun = async (taskId: string) => {
+    try {
+      const runs = await host.listRuns(taskId);
+      if (!runs[0]) return setNotice('该任务尚无运行记录。');
+      setActiveRun(runs[0]);
+      setNotice(`正在查看运行：${runs[0].id}`);
+    } catch (error) { setNotice(`读取运行记录失败：${asText(error)}`); }
   };
 
   const openLogin = async (platformId: string) => {
@@ -75,7 +111,7 @@ function App() {
       await host.cancelPlatformLogin(sessionId);
       setLoginSessions((current) => { const next = { ...current }; delete next[platformId]; return next; });
       await refresh();
-      setNotice('已关闭当前登录浏览器，尚未授予自动化访问。');
+      setNotice('已关闭当前登录浏览器，已有授权状态保持不变。');
     } catch (error) { setNotice(`取消登录失败：${asText(error)}`); }
   };
 
@@ -137,7 +173,13 @@ function App() {
       <p>已识别 {parsedQueries.length} 条查询，默认目标为 9 个标讯平台。</p><button onClick={createTask}>创建任务</button><button className="secondary" onClick={() => void refresh()}>刷新</button>
     </section>
 
-    <section className="card"><h2>任务</h2><table><thead><tr><th>名称</th><th>状态</th><th>查询</th><th>更新时间</th><th>操作</th></tr></thead><tbody>{tasks.map((task) => <tr key={task.id}><td>{task.name}</td><td>{task.status}</td><td>{task.queries.length}</td><td>{task.updatedAt}</td><td><button disabled={task.status === 'running'} onClick={() => void startTask(task.id)}>执行</button></td></tr>)}</tbody></table></section>
+    <section className="card"><h2>任务</h2><table><thead><tr><th>名称</th><th>状态</th><th>查询</th><th>更新时间</th><th>操作</th></tr></thead><tbody>{tasks.map((task) => <tr key={task.id}><td>{task.name}</td><td>{task.status}</td><td>{task.queries.length}</td><td>{task.updatedAt}</td><td><button disabled={task.status === 'running'} onClick={() => void startTask(task.id)}>执行</button><button className="secondary" onClick={() => void showLatestRun(task.id)}>日志</button></td></tr>)}</tbody></table></section>
+
+    {activeRun && <section className="card"><h2>运行日志</h2>
+      <p className="hint">Run：{activeRun.id} · 状态：{activeRun.status} · Correlation：{activeRun.correlationId} · 证据：{artifacts.length} 项</p>
+      <table><thead><tr><th>时间</th><th>级别</th><th>事件</th><th>负载</th></tr></thead><tbody>{runEvents.slice(-80).map((event) => <tr key={event.id}><td>{event.timestamp}</td><td>{event.level}</td><td>{event.type}</td><td><code>{JSON.stringify(event.payload)}</code></td></tr>)}</tbody></table>
+      {artifacts.length > 0 && <details><summary>证据索引（{artifacts.length}）</summary><ul>{artifacts.map((artifact) => <li key={artifact.id}>{artifact.platformId} · {artifact.kind} · <code>{artifact.relativePath}</code></li>)}</ul></details>}
+    </section>}
   </main>;
 }
 
