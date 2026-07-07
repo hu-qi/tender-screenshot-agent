@@ -42,3 +42,8 @@ export class MacOSKeychainStore implements SecretStore {
 
 export const WECOM_BOT_ID = 'wecom-bot-id';
 export const WECOM_BOT_SECRET = 'wecom-bot-secret';
+
+export function modelApiKeyAccount(profile: string): string {
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(profile)) throw new Error('invalid model profile name');
+  return `llm-api-key:${profile}`;
+}

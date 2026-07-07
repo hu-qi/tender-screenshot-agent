@@ -11,6 +11,18 @@ const searchPlatformSchema = Type.Object({
 
 type SearchPlatformInput = Static<typeof searchPlatformSchema>;
 
+function modelSafeReason(outcome: PlatformOutcome): string | undefined {
+  if (!outcome.reason) return undefined;
+  if (outcome.status === 'manual-review-required') return 'manual review is required for this platform state';
+  if (outcome.status !== 'failed') return undefined;
+  const reason = outcome.reason.toLowerCase();
+  if (reason.includes('timeout') || reason.includes('timed out')) return 'browser navigation timeout';
+  if (reason.includes('selector') || reason.includes('locator')) return 'recorded page selector is unavailable';
+  if (reason.includes('net::') || reason.includes('dns') || reason.includes('connection')) return 'browser network failure';
+  if (reason.includes('login') || reason.includes('session')) return 'platform session requires user attention';
+  return 'browser capture failed; inspect local trace during manual review';
+}
+
 export function createSearchPlatformTool(input: {
   runId: string;
   correlationId: string;
@@ -46,7 +58,12 @@ export function createSearchPlatformTool(input: {
         artifactCount: outcome.artifacts.length,
         correlationId: input.correlationId,
       });
-      return { content: [{ type: 'text', text: JSON.stringify({ platformId: outcome.platformId, status: outcome.status, reason: outcome.reason }) }], details: outcome };
+      const modelSummary = {
+        platformId: outcome.platformId,
+        status: outcome.status,
+        ...(modelSafeReason(outcome) ? { reason: modelSafeReason(outcome) } : {}),
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(modelSummary) }], details: outcome };
     },
   };
 }
