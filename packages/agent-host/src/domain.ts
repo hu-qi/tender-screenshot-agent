@@ -16,6 +16,7 @@ export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial-success' 
 export type RunStatus = 'running' | 'completed' | 'partial-success' | 'manual-review-required' | 'failed';
 export type AccessMode = 'public' | 'manual-login' | 'ca-login';
 export type AdapterStatus = 'verified' | 'unverified';
+export type PlatformProfileStatus = 'not-configured' | 'login-open' | 'user-confirmed' | 'expired';
 
 export interface PlatformAdapterConfig {
   id: PlatformId;
@@ -29,6 +30,27 @@ export interface PlatformAdapterConfig {
     resultLink?: string;
     detailBody?: string;
   };
+}
+
+export interface PlatformProfile {
+  platformId: PlatformId;
+  status: PlatformProfileStatus;
+  profileDir: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  lastValidatedAt?: string;
+  message?: string;
+}
+
+export interface PlatformAccessView extends PlatformAdapterConfig {
+  profile: PlatformProfile;
+}
+
+export interface LoginSession {
+  id: string;
+  platformId: PlatformId;
+  entryUrl: string;
+  startedAt: string;
 }
 
 export interface TenderTaskInput {
