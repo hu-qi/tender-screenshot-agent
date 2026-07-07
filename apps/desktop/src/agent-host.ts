@@ -13,6 +13,11 @@ export type Task = {
   updatedAt: string;
 };
 
+export type RunSummary = { successful: number; manualReview: number; failed: number; artifacts: number };
+export type Run = { id: string; taskId: string; status: string; correlationId: string; startedAt: string; finishedAt?: string; summary?: RunSummary };
+export type RunEvent = { id: number; runId: string; sequence: number; timestamp: string; type: string; level: 'info' | 'warn' | 'error'; payload: Record<string, unknown> };
+export type Artifact = { id: string; runId: string; platformId: string; kind: string; relativePath: string; sha256: string; createdAt: string };
+
 export type PlatformProfile = {
   platformId: string;
   status: 'not-configured' | 'login-open' | 'user-confirmed' | 'expired';
@@ -59,11 +64,14 @@ export class AgentHostClient {
   listPlatforms() { return this.request<PlatformAccess[]>('/api/platforms'); }
   openPlatformLogin(platformId: string) { return this.request<LoginSession>(`/api/platforms/${encodeURIComponent(platformId)}/login`, { method: 'POST', body: '{}' }); }
   completePlatformLogin(sessionId: string) { return this.request<{ session: LoginSession; profile: PlatformProfile }>(`/api/platform-logins/${encodeURIComponent(sessionId)}/complete`, { method: 'POST', body: '{}' }); }
-  cancelPlatformLogin(sessionId: string) { return this.request<void>(`/api/platform-logins/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST', body: '{}' }); }
+  cancelPlatformLogin(sessionId: string) { return this.request<{ cancelled: boolean }>(`/api/platform-logins/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST', body: '{}' }); }
   clearPlatformProfile(platformId: string) { return this.request<PlatformProfile>(`/api/platforms/${encodeURIComponent(platformId)}/profile`, { method: 'POST', body: '{}' }); }
   listTasks() { return this.request<Task[]>('/api/tasks'); }
   createTask(input: { name: string; queries: string[]; platformIds: string[]; privacyMode: string }) { return this.request<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(input) }); }
-  startRun(taskId: string) { return this.request(`/api/tasks/${taskId}/runs`, { method: 'POST', body: '{}' }); }
+  listRuns(taskId: string) { return this.request<Run[]>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); }
+  startRun(taskId: string) { return this.request<Run>(`/api/tasks/${encodeURIComponent(taskId)}/runs`, { method: 'POST', body: '{}' }); }
+  listEvents(runId: string, after = 0) { return this.request<RunEvent[]>(`/api/runs/${encodeURIComponent(runId)}/events?after=${after}`); }
+  listArtifacts(runId: string) { return this.request<Artifact[]>(`/api/runs/${encodeURIComponent(runId)}/artifacts`); }
   getWeCom() { return this.request<WeComStatus>('/api/settings/wecom'); }
   saveWeCom(input: { botId: string; botSecret: string; targetIds: string[]; enabled: boolean; websocketUrl?: string }) { return this.request<WeComStatus>('/api/settings/wecom', { method: 'PUT', body: JSON.stringify(input) }); }
   testWeCom() { return this.request('/api/settings/wecom/test', { method: 'POST', body: '{}' }); }
