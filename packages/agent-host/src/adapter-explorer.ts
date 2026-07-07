@@ -7,7 +7,6 @@ import type { PlatformAdapterConfig, PlatformId } from './domain.js';
 import { QWebBridgeClient, type QWebBridgeDiscovery, type SnapshotNode } from './qwebbridge.js';
 
 export type RecordingStage = 'entry' | 'authenticated' | 'search-hit' | 'no-result' | 'page-2' | 'detail' | 'manual-boundary';
-export type ExplorationMode = 'passive' | 'search-probe';
 
 export interface CandidateLocator {
   selector?: string;
@@ -81,6 +80,16 @@ function now(): string { return new Date().toISOString(); }
 
 function stageAssert(stage: string): asserts stage is RecordingStage {
   if (!ALL_STAGES.has(stage as RecordingStage)) throw new Error(`unsupported recording stage: ${stage}`);
+}
+
+function samePlatformDomain(entryUrl: string, actualUrl: string): boolean {
+  try {
+    const expected = new URL(entryUrl).hostname.toLowerCase();
+    const actual = new URL(actualUrl).hostname.toLowerCase();
+    return actual === expected || actual.endsWith(`.${expected}`) || expected.endsWith(`.${actual}`);
+  } catch {
+    return false;
+  }
 }
 
 function score(candidate: Record<string, unknown>, intent: 'input' | 'submit' | 'detail' | 'pagination'): number {
@@ -199,6 +208,9 @@ export class QWebBridgeAdapterExplorer {
     const stageDir = join(root, 'stages');
     const capturedAt = now();
     const [snapshot, discovery] = await Promise.all([this.client.snapshot(), this.client.discover()]);
+    if (!samePlatformDomain(platform.entryUrl, discovery.url)) {
+      throw new Error(`active QWebBridge tab is outside the platform domain: ${discovery.url}`);
+    }
     const screenshot = await this.client.screenshot(join(stageDir, `${stageValue}.png`));
     const snapshotPath = join(stageDir, `${stageValue}.snapshot.json`);
     const discoveryPath = join(stageDir, `${stageValue}.discovery.json`);
