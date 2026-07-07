@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
-import { chromium, type BrowserContext } from 'playwright';
+import type { BrowserContext } from 'playwright';
+import { BrowserRuntimeManager } from './browser-runtime.js';
 import type { HostConfig } from './config.js';
 import type { LoginSession, PlatformAdapterConfig, PlatformId, PlatformProfileStatus } from './domain.js';
 
@@ -13,7 +14,10 @@ interface ActiveLogin extends LoginSession {
 export class LoginManager {
   private readonly active = new Map<string, ActiveLogin>();
 
-  constructor(private readonly config: HostConfig) {}
+  constructor(
+    private readonly config: HostConfig,
+    private readonly runtime: BrowserRuntimeManager,
+  ) {}
 
   profileDir(platformId: PlatformId): string {
     return resolve(this.config.profilesDir, platformId, 'default');
@@ -34,14 +38,13 @@ export class LoginManager {
     const profileDir = this.profileDir(platform.id);
     this.assertProfilePath(profileDir);
     await mkdir(profileDir, { recursive: true });
-    const context = await chromium.launchPersistentContext(profileDir, {
+    const context = await this.runtime.launchPersistentContext(profileDir, {
       headless: false,
-      executablePath: this.config.chromiumPath,
       viewport: { width: 1440, height: 1000 },
       acceptDownloads: true,
     });
     const page = context.pages()[0] || await context.newPage();
-    await page.goto(platform.entryUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.goto(platform.entryUrl, { waitUntil: 'domcontentloaded', timeout: this.config.navigationTimeoutMs });
     await page.bringToFront();
 
     const session: ActiveLogin = {
