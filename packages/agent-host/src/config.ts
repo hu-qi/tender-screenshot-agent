@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { PlatformAdapterConfig, PlatformId } from './domain.js';
 import { loadHostEnv, positiveInteger } from './env.js';
+import { assertLoopbackHttpUrl, parseBoolean } from './security-config.js';
 
 const defaults: PlatformAdapterConfig[] = [
   ['cmcc', '中国移动电子采购与招投标系统', 'https://es.b2b.10086.cn/newbid/', 'manual-login'],
@@ -39,6 +40,9 @@ export function resolveHostConfig(argv: string[]): HostConfig {
   const token = option('--token') || process.env.TENDER_AGENT_TOKEN || '';
   if (!token) throw new Error('TENDER_AGENT_TOKEN is required; the host refuses unauthenticated local requests');
   const platformConfigPath = resolve(process.env.TENDER_PLATFORM_CONFIG || resolve(configDir, 'platforms.json'));
+  const qwebBridgeEnabled = parseBoolean(process.env.TENDER_QWEBBRIDGE_ENABLED, false);
+  const qwebBridgeUrl = process.env.TENDER_QWEBBRIDGE_URL || 'http://127.0.0.1:10086';
+  if (qwebBridgeEnabled) assertLoopbackHttpUrl(qwebBridgeUrl, 'TENDER_QWEBBRIDGE_URL');
   const config: HostConfig = {
     port,
     token,
@@ -49,8 +53,8 @@ export function resolveHostConfig(argv: string[]): HostConfig {
     platformConfigPath,
     chromiumPath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined,
     navigationTimeoutMs: positiveInteger(process.env.TENDER_BROWSER_TIMEOUT_MS, 45_000, 'TENDER_BROWSER_TIMEOUT_MS'),
-    qwebBridgeEnabled: process.env.TENDER_QWEBBRIDGE_ENABLED === 'true',
-    qwebBridgeUrl: process.env.TENDER_QWEBBRIDGE_URL || 'http://127.0.0.1:10086',
+    qwebBridgeEnabled,
+    qwebBridgeUrl,
   };
   for (const dir of [config.dataDir, config.configDir, config.profilesDir, config.evidenceDir]) mkdirSync(dir, { recursive: true });
   return config;
