@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { HostConfig } from './config.js';
-import type { PlatformAccessView, PlatformId, TenderTaskInput, WeComSettingsInput } from './domain.js';
+import type { PlatformAccessView, PlatformAdapterConfig, TenderTaskInput, WeComSettingsInput } from './domain.js';
 import { RunEvents } from './events.js';
 import { MacOSKeychainStore, WECOM_BOT_ID, WECOM_BOT_SECRET } from './keychain.js';
 import { LoginManager } from './login-manager.js';
@@ -30,16 +30,12 @@ async function body(request: IncomingMessage): Promise<unknown> {
   return text ? JSON.parse(text) : {};
 }
 
-function platformId(value: string): PlatformId {
-  return value as PlatformId;
-}
-
 export function createAgentServer(input: {
   config: HostConfig;
   store: TenderStore;
   events: RunEvents;
   engine: RunEngine;
-  platforms: Map<string, PlatformAccessView extends infer _Never ? any : never>;
+  platforms: Map<string, PlatformAdapterConfig>;
   loginManager: LoginManager;
 }) {
   const keychain = new MacOSKeychainStore();
@@ -73,11 +69,13 @@ export function createAgentServer(input: {
       if (request.method === 'POST' && openLogin) {
         const platform = getPlatform(openLogin[1]);
         const session = await input.loginManager.open(platform);
+        const profile = input.store.getPlatformProfile(platform.id, input.loginManager.profileDir(platform.id));
         input.store.setPlatformProfile({
           platformId: platform.id,
           status: 'login-open',
           profileDir: input.loginManager.profileDir(platform.id),
-          lastLoginAt: input.store.getPlatformProfile(platform.id, input.loginManager.profileDir(platform.id)).lastLoginAt,
+          lastLoginAt: profile.lastLoginAt,
+          lastValidatedAt: profile.lastValidatedAt,
           message: 'interactive browser is open; confirm only after completing the lawful platform login',
         });
         return json(response, 202, session);
