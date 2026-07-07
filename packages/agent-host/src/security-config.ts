@@ -80,6 +80,7 @@ function assertProfileName(value: string): string {
 function assertModelEndpoint(input: { baseUrl?: string; egressPolicy: ModelEgressPolicy; allowedHosts: string[]; providerKind: ModelProviderKind }): void {
   if (input.providerKind === 'builtin') {
     if (input.baseUrl) throw new Error('TENDER_LLM_BASE_URL is only supported when TENDER_LLM_PROVIDER_KIND=openai-compatible');
+    if (input.egressPolicy !== 'external-approved') throw new Error('built-in model providers require TENDER_LLM_EGRESS_POLICY=external-approved; use openai-compatible for approved internal or local endpoints');
     return;
   }
   if (!input.baseUrl) throw new Error('TENDER_LLM_BASE_URL is required for openai-compatible model profiles');
