@@ -2,7 +2,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentEventRecord, ArtifactRecord, RunSummary, TenderRun, TenderTask, TenderTaskInput, WeComSettingsStatus } from './domain.js';
+import type {
+  AgentEventRecord,
+  ArtifactRecord,
+  PlatformId,
+  PlatformProfile,
+  PlatformProfileStatus,
+  RunSummary,
+  TenderRun,
+  TenderTask,
+  TenderTaskInput,
+  WeComSettingsStatus,
+} from './domain.js';
 
 const timestamp = () => new Date().toISOString();
 
@@ -57,34 +68,45 @@ export class TenderStore {
         value_json TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS platform_profiles (
+        platform_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        profile_dir TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_login_at TEXT,
+        last_validated_at TEXT,
+        message TEXT
+      );
     `);
   }
 
   createTask(input: TenderTaskInput): TenderTask {
     const now = timestamp();
     const task: TenderTask = { ...input, id: randomUUID(), status: 'queued', createdAt: now, updatedAt: now };
-    this.db.prepare(`INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(task.id, task.name, JSON.stringify(task.queries), JSON.stringify(task.platformIds), task.privacyMode, task.status, task.createdAt, task.updatedAt);
+    this.db.prepare(`INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      task.id,
+      task.name,
+      JSON.stringify(task.queries),
+      JSON.stringify(task.platformIds),
+      task.privacyMode,
+      task.status,
+      task.createdAt,
+      task.updatedAt,
+    );
     return task;
   }
 
   listTasks(): TenderTask[] {
     const rows = this.db.prepare(`SELECT * FROM tasks ORDER BY created_at DESC`).all() as Array<Record<string, string>>;
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      queries: JSON.parse(row.queries_json),
-      platformIds: JSON.parse(row.platform_ids_json),
-      privacyMode: row.privacy_mode as TenderTask['privacyMode'],
-      status: row.status as TenderTask['status'],
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    return rows.map((row) => this.taskFromRow(row));
   }
 
   getTask(taskId: string): TenderTask | undefined {
     const row = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(taskId) as Record<string, string> | undefined;
-    if (!row) return undefined;
+    return row ? this.taskFromRow(row) : undefined;
+  }
+
+  private taskFromRow(row: Record<string, string>): TenderTask {
     return {
       id: row.id,
       name: row.name,
@@ -103,21 +125,25 @@ export class TenderStore {
 
   createRun(taskId: string): TenderRun {
     const run: TenderRun = { id: randomUUID(), taskId, status: 'running', correlationId: randomUUID(), startedAt: timestamp() };
-    this.db.prepare(`INSERT INTO runs(id, task_id, status, correlation_id, started_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(run.id, run.taskId, run.status, run.correlationId, run.startedAt);
+    this.db.prepare(`INSERT INTO runs(id, task_id, status, correlation_id, started_at) VALUES (?, ?, ?, ?, ?)`).run(run.id, run.taskId, run.status, run.correlationId, run.startedAt);
     return run;
   }
 
   finishRun(runId: string, status: TenderRun['status'], summary: RunSummary): void {
-    this.db.prepare(`UPDATE runs SET status = ?, finished_at = ?, summary_json = ? WHERE id = ?`)
-      .run(status, timestamp(), JSON.stringify(summary), runId);
+    this.db.prepare(`UPDATE runs SET status = ?, finished_at = ?, summary_json = ? WHERE id = ?`).run(status, timestamp(), JSON.stringify(summary), runId);
   }
 
   appendEvent(runId: string, type: string, level: AgentEventRecord['level'], payload: Record<string, unknown>): AgentEventRecord {
     const next = this.db.prepare(`SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM events WHERE run_id = ?`).get(runId) as { sequence: number };
     const record = { runId, sequence: next.sequence, timestamp: timestamp(), type, level, payload };
-    const result = this.db.prepare(`INSERT INTO events(run_id, sequence, timestamp, type, level, payload_json) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(record.runId, record.sequence, record.timestamp, record.type, record.level, JSON.stringify(record.payload));
+    const result = this.db.prepare(`INSERT INTO events(run_id, sequence, timestamp, type, level, payload_json) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      record.runId,
+      record.sequence,
+      record.timestamp,
+      record.type,
+      record.level,
+      JSON.stringify(record.payload),
+    );
     return { id: Number(result.lastInsertRowid), ...record };
   }
 
@@ -136,8 +162,15 @@ export class TenderStore {
 
   addArtifact(artifact: Omit<ArtifactRecord, 'id' | 'createdAt'>): ArtifactRecord {
     const record: ArtifactRecord = { id: randomUUID(), createdAt: timestamp(), ...artifact };
-    this.db.prepare(`INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(record.id, record.runId, record.platformId, record.kind, record.relativePath, record.sha256, record.createdAt);
+    this.db.prepare(`INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      record.id,
+      record.runId,
+      record.platformId,
+      record.kind,
+      record.relativePath,
+      record.sha256,
+      record.createdAt,
+    );
     return record;
   }
 
@@ -154,9 +187,48 @@ export class TenderStore {
     }));
   }
 
+  getPlatformProfile(platformId: PlatformId, profileDir: string): PlatformProfile {
+    const row = this.db.prepare(`SELECT * FROM platform_profiles WHERE platform_id = ?`).get(platformId) as Record<string, string> | undefined;
+    if (!row) {
+      return { platformId, status: 'not-configured', profileDir, updatedAt: '' };
+    }
+    return {
+      platformId: row.platform_id as PlatformId,
+      status: row.status as PlatformProfileStatus,
+      profileDir: row.profile_dir,
+      updatedAt: row.updated_at,
+      lastLoginAt: row.last_login_at || undefined,
+      lastValidatedAt: row.last_validated_at || undefined,
+      message: row.message || undefined,
+    };
+  }
+
+  setPlatformProfile(input: Omit<PlatformProfile, 'updatedAt'>): PlatformProfile {
+    const updatedAt = timestamp();
+    this.db.prepare(`
+      INSERT INTO platform_profiles(platform_id,status,profile_dir,updated_at,last_login_at,last_validated_at,message)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(platform_id) DO UPDATE SET
+        status=excluded.status,
+        profile_dir=excluded.profile_dir,
+        updated_at=excluded.updated_at,
+        last_login_at=excluded.last_login_at,
+        last_validated_at=excluded.last_validated_at,
+        message=excluded.message
+    `).run(
+      input.platformId,
+      input.status,
+      input.profileDir,
+      updatedAt,
+      input.lastLoginAt || null,
+      input.lastValidatedAt || null,
+      input.message || null,
+    );
+    return { ...input, updatedAt };
+  }
+
   setPublicSetting(key: string, value: unknown): void {
-    this.db.prepare(`INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`)
-      .run(key, JSON.stringify(value), timestamp());
+    this.db.prepare(`INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`).run(key, JSON.stringify(value), timestamp());
   }
 
   getPublicSetting<T>(key: string): { value: T; updatedAt: string } | undefined {
