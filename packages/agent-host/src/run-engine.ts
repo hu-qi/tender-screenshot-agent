@@ -112,6 +112,15 @@ export class RunEngine {
   private async executeWithPi(task: TenderTask, run: TenderRun, tool: AgentTool<any>, modelProfile: ResolvedModelProfile): Promise<PlatformOutcome[]> {
     const outcomes: PlatformOutcome[] = [];
     const pairs = this.requestedPairs(task);
+    const serializedPairs = JSON.stringify(pairs);
+    if (serializedPairs.length > modelProfile.config.maxInputChars) {
+      this.events.emit(run.id, 'model.input.limit_reached', 'warn', {
+        metadataChars: serializedPairs.length,
+        maxInputChars: modelProfile.config.maxInputChars,
+        correlationId: run.correlationId,
+      });
+      return this.executePairs(task, run, tool, pairs);
+    }
     const allowedPairs = new Set(pairs.map((pair) => `${pair.platformId}\u0000${pair.query}`));
     const startedPairs = new Set<string>();
     const completedPairs = new Set<string>();
@@ -163,7 +172,7 @@ export class RunEngine {
     });
 
     try {
-      await agent.prompt(`Collect evidence for exactly these pairs: ${JSON.stringify(pairs)}. Do not make any other browser request.`);
+      await agent.prompt(`Collect evidence for exactly these pairs: ${serializedPairs}. Do not make any other browser request.`);
     } catch (error) {
       this.events.emit(run.id, 'model.orchestration.failed', 'warn', { reason: error instanceof Error ? error.message : String(error), correlationId: run.correlationId });
     }
