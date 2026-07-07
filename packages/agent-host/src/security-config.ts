@@ -135,6 +135,7 @@ function loadModelBootstrap(env: NodeJS.ProcessEnv): ModelBootstrapConfig {
   if (!enabled && mode !== 'disabled') throw new Error('TENDER_LLM_MODE=orchestrate requires TENDER_LLM_ENABLED=true');
   if (enabled && (!provider || !model)) throw new Error('TENDER_LLM_ENABLED=true requires TENDER_LLM_PROVIDER and TENDER_LLM_MODEL');
   if (enabled) assertModelEndpoint(config);
+  if (enabled && providerKind === 'builtin' && authMode === 'none') throw new Error('builtin model providers require TENDER_LLM_AUTH_MODE=keychain');
   if (authMode === 'none' && env.TENDER_LLM_API_KEY?.trim()) throw new Error('TENDER_LLM_API_KEY must be empty when TENDER_LLM_AUTH_MODE=none');
   return config;
 }
