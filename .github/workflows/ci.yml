@@ -29,6 +29,8 @@ jobs:
           npm run typecheck 2>&1 | tee typecheck.log
       - name: Build Pi Agent Host
         run: npm run build:agent-host
+      - name: Run Agent Host tests
+        run: npm test
       - name: Scan for leaked credentials
         run: npm run secret-scan
       - name: Upload host diagnostics
