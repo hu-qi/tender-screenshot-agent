@@ -96,27 +96,33 @@ fn agent_host_config(state: State<AgentHostState>) -> AgentHostConfig {
 }
 
 fn stop_agent_host(app: &tauri::AppHandle) {
-    let state = app.state::<AgentHostState>();
-    if let Ok(mut child) = state.child.lock() {
-        if let Some(mut process) = child.take() {
-            let _ = process.kill();
-            let _ = process.wait();
+    let process = {
+        let state = app.state::<AgentHostState>();
+        match state.child.lock() {
+            Ok(mut child) => child.take(),
+            Err(_) => None,
         }
+    };
+    if let Some(mut process) = process {
+        let _ = process.kill();
+        let _ = process.wait();
     }
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             let host = start_agent_host(app).map_err(io::Error::other)?;
             app.manage(host);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![agent_host_config])
-        .run(tauri::generate_context!(), |app, event| {
-            if matches!(event, tauri::RunEvent::Exit { .. } | tauri::RunEvent::ExitRequested { .. }) {
-                stop_agent_host(app);
-            }
-        })
-        .expect("tauri runtime error");
+        .build(tauri::generate_context!())
+        .expect("tauri build error");
+
+    app.run(|app, event| {
+        if matches!(event, tauri::RunEvent::Exit { .. } | tauri::RunEvent::ExitRequested { .. }) {
+            stop_agent_host(app);
+        }
+    });
 }
