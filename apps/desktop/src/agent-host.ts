@@ -39,6 +39,17 @@ export type PlatformAccess = {
 
 export type LoginSession = { id: string; platformId: string; entryUrl: string; startedAt: string };
 export type WeComStatus = { configured: boolean; enabled: boolean; targetCount: number; websocketUrl?: string; updatedAt?: string };
+export type WeComAuthentication = { authenticated: true; latencyMs: number };
+export type WeComDelivery = WeComAuthentication & { delivered: number; rejected: number };
+export type BrowserRuntimeStatus = {
+  ready: boolean;
+  source: 'configured' | 'playwright' | 'system-chrome' | 'missing';
+  executablePath?: string;
+  expectedPlaywrightPath: string;
+  configuredPath?: string;
+  installCommand: string;
+  message: string;
+};
 
 export class AgentHostClient {
   private config?: HostConfig;
@@ -61,6 +72,8 @@ export class AgentHostClient {
   }
 
   health() { return this.request<{ ok: boolean }>('/health'); }
+  getBrowserRuntime() { return this.request<BrowserRuntimeStatus>('/api/browser/runtime'); }
+  installBrowserRuntime() { return this.request<BrowserRuntimeStatus>('/api/browser/install', { method: 'POST', body: '{}' }); }
   listPlatforms() { return this.request<PlatformAccess[]>('/api/platforms'); }
   openPlatformLogin(platformId: string) { return this.request<LoginSession>(`/api/platforms/${encodeURIComponent(platformId)}/login`, { method: 'POST', body: '{}' }); }
   completePlatformLogin(sessionId: string) { return this.request<{ session: LoginSession; profile: PlatformProfile }>(`/api/platform-logins/${encodeURIComponent(sessionId)}/complete`, { method: 'POST', body: '{}' }); }
@@ -74,6 +87,6 @@ export class AgentHostClient {
   listArtifacts(runId: string) { return this.request<Artifact[]>(`/api/runs/${encodeURIComponent(runId)}/artifacts`); }
   getWeCom() { return this.request<WeComStatus>('/api/settings/wecom'); }
   saveWeCom(input: { botId: string; botSecret: string; targetIds: string[]; enabled: boolean; websocketUrl?: string }) { return this.request<WeComStatus>('/api/settings/wecom', { method: 'PUT', body: JSON.stringify(input) }); }
-  testWeCom() { return this.request('/api/settings/wecom/test', { method: 'POST', body: '{}' }); }
-  sendWeComTest(markdown: string) { return this.request<{ delivered: number; rejected: number }>('/api/settings/wecom/send-test', { method: 'POST', body: JSON.stringify({ markdown }) }); }
+  testWeCom() { return this.request<WeComAuthentication>('/api/settings/wecom/test', { method: 'POST', body: '{}' }); }
+  sendWeComTest(markdown: string) { return this.request<WeComDelivery>('/api/settings/wecom/send-test', { method: 'POST', body: JSON.stringify({ markdown }) }); }
 }
