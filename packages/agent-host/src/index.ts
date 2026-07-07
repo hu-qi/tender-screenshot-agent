@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { BrowserEvidenceTool } from './browser.js';
+import { BrowserRuntimeManager } from './browser-runtime.js';
 import { loadPlatformRegistry, resolveHostConfig } from './config.js';
 import { RunEvents } from './events.js';
 import { createAgentServer } from './http.js';
@@ -11,10 +12,11 @@ const config = resolveHostConfig(process.argv.slice(2));
 const store = new TenderStore(join(config.dataDir, 'tender-agent.db'));
 const events = new RunEvents(store);
 const platforms = new Map(loadPlatformRegistry(config).map((platform) => [platform.id, platform]));
-const browser = new BrowserEvidenceTool(config, store);
-const loginManager = new LoginManager(config);
+const browserRuntime = new BrowserRuntimeManager(config);
+const browser = new BrowserEvidenceTool(config, store, browserRuntime);
+const loginManager = new LoginManager(config, browserRuntime);
 const engine = new RunEngine(config, store, events, browser, platforms);
-const server = createAgentServer({ config, store, events, engine, platforms, loginManager });
+const server = createAgentServer({ config, store, events, engine, platforms, loginManager, browserRuntime });
 
 server.listen(config.port, '127.0.0.1', () => {
   process.stdout.write(`${JSON.stringify({ event: 'agent-host-ready', port: config.port })}\n`);

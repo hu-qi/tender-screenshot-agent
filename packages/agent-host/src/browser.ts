@@ -1,10 +1,10 @@
-import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { ArtifactRecord, PlatformAdapterConfig, PlatformOutcome } from './domain.js';
 import type { HostConfig } from './config.js';
+import { BrowserRuntimeManager } from './browser-runtime.js';
 import { TenderStore } from './store.js';
 
 const sha256 = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
@@ -13,6 +13,7 @@ export class BrowserEvidenceTool {
   constructor(
     private readonly config: HostConfig,
     private readonly store: TenderStore,
+    private readonly runtime: BrowserRuntimeManager,
   ) {}
 
   private profileDir(platformId: string): string {
@@ -50,25 +51,26 @@ export class BrowserEvidenceTool {
     const profileDir = this.profileDir(platform.id);
     await mkdir(profileDir, { recursive: true });
     const hasProfile = existsSync(join(profileDir, 'Default')) || existsSync(join(profileDir, 'Local State'));
-    onProgress('browser.launch.requested', 'info', { platformId: platform.id, hasProfile });
+    const runtime = this.runtime.status();
+    onProgress('browser.launch.requested', 'info', { platformId: platform.id, hasProfile, runtimeReady: runtime.ready, runtimeSource: runtime.source });
 
-    const context = await chromium.launchPersistentContext(profileDir, {
-      headless: true,
-      executablePath: this.config.chromiumPath,
-      viewport: { width: 1440, height: 1000 },
-      acceptDownloads: true,
-    });
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+    const artifacts: ArtifactRecord[] = [];
+    let context: Awaited<ReturnType<BrowserRuntimeManager['launchPersistentContext']>> | undefined;
     let traceStopped = false;
     const stopTrace = async (path?: string) => {
-      if (traceStopped) return;
+      if (!context || traceStopped) return;
       traceStopped = true;
       await context.tracing.stop(path ? { path } : undefined);
     };
-    const artifacts: ArtifactRecord[] = [];
-    const page = await context.newPage();
 
     try {
+      context = await this.runtime.launchPersistentContext(profileDir, {
+        headless: true,
+        viewport: { width: 1440, height: 1000 },
+        acceptDownloads: true,
+      });
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+      const page = await context.newPage();
       await page.goto(platform.entryUrl, { waitUntil: 'domcontentloaded', timeout: this.config.navigationTimeoutMs });
       const landingPath = join(outputDir, 'landing.png');
       await page.screenshot({ path: landingPath, fullPage: true });
@@ -120,8 +122,9 @@ export class BrowserEvidenceTool {
       onProgress('browser.capture.completed', 'info', { platformId: platform.id, artifactCount: artifacts.length });
       return { platformId: platform.id, status: 'success', artifacts };
     } catch (error) {
+      const page = context?.pages()[0];
       const failurePath = join(outputDir, 'failure.png');
-      await page.screenshot({ path: failurePath, fullPage: true }).catch(() => undefined);
+      if (page) await page.screenshot({ path: failurePath, fullPage: true }).catch(() => undefined);
       if (existsSync(failurePath)) artifacts.push(await this.writeArtifact(runId, platform.id, 'failure-screenshot', failurePath));
       const tracePath = join(outputDir, 'failure-trace.zip');
       await stopTrace(tracePath).catch(() => undefined);
@@ -131,7 +134,7 @@ export class BrowserEvidenceTool {
       return { platformId: platform.id, status: 'failed', reason, artifacts };
     } finally {
       await stopTrace().catch(() => undefined);
-      await context.close();
+      await context?.close().catch(() => undefined);
     }
   }
 }

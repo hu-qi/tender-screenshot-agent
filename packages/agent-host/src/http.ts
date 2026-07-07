@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { BrowserRuntimeError, BrowserRuntimeManager } from './browser-runtime.js';
 import type { HostConfig } from './config.js';
 import type { PlatformAccessView, PlatformAdapterConfig, TenderTaskInput, WeComSettingsInput } from './domain.js';
 import { RunEvents } from './events.js';
@@ -6,7 +7,7 @@ import { MacOSKeychainStore, WECOM_BOT_ID, WECOM_BOT_SECRET } from './keychain.j
 import { LoginManager } from './login-manager.js';
 import { RunEngine } from './run-engine.js';
 import { TenderStore } from './store.js';
-import { testWeComBot, sendWeComMarkdown } from './wecom.js';
+import { testWeComBot, sendWeComMarkdown, WeComBotError } from './wecom.js';
 
 const json = (res: ServerResponse, status: number, value: unknown) => {
   res.writeHead(status, {
@@ -30,6 +31,16 @@ async function body(request: IncomingMessage): Promise<unknown> {
   return text ? JSON.parse(text) : {};
 }
 
+function publicError(error: unknown): { status: number; payload: Record<string, unknown> } {
+  if (error instanceof BrowserRuntimeError) {
+    return { status: 409, payload: { error: error.message, code: error.code, browser: error.status } };
+  }
+  if (error instanceof WeComBotError) {
+    return { status: 400, payload: { error: error.message, code: error.code } };
+  }
+  return { status: 400, payload: { error: error instanceof Error ? error.message : String(error) } };
+}
+
 export function createAgentServer(input: {
   config: HostConfig;
   store: TenderStore;
@@ -37,6 +48,7 @@ export function createAgentServer(input: {
   engine: RunEngine;
   platforms: Map<string, PlatformAdapterConfig>;
   loginManager: LoginManager;
+  browserRuntime: BrowserRuntimeManager;
 }) {
   const keychain = new MacOSKeychainStore();
   const authorize = (request: IncomingMessage): boolean => request.headers.authorization === `Bearer ${input.config.token}`;
@@ -62,7 +74,9 @@ export function createAgentServer(input: {
     if (!authorize(request)) return json(response, 401, { error: 'unauthorized' });
     const url = new URL(request.url || '/', `http://127.0.0.1:${input.config.port}`);
     try {
-      if (request.method === 'GET' && url.pathname === '/health') return json(response, 200, { ok: true, version: '0.2.0' });
+      if (request.method === 'GET' && url.pathname === '/health') return json(response, 200, { ok: true, version: '0.2.1' });
+      if (request.method === 'GET' && url.pathname === '/api/browser/runtime') return json(response, 200, input.browserRuntime.status());
+      if (request.method === 'POST' && url.pathname === '/api/browser/install') return json(response, 200, await input.browserRuntime.installChromium());
       if (request.method === 'GET' && url.pathname === '/api/platforms') return json(response, 200, listPlatforms());
 
       const openLogin = url.pathname.match(/^\/api\/platforms\/([^/]+)\/login$/);
@@ -152,7 +166,7 @@ export function createAgentServer(input: {
       if (request.method === 'PUT' && url.pathname === '/api/settings/wecom') {
         const payload = await body(request) as WeComSettingsInput;
         if (!payload.botId?.trim() || !payload.botSecret?.trim()) throw new Error('Bot ID and Bot Secret are required');
-        const targets = [...new Set((payload.targetIds || []).map((item) => item.trim()).filter(Boolean))];
+        const targets = [...new Set((payload.targetIds || []).flatMap((item) => item.split(/[\n,;]+/)).map((item) => item.trim()).filter(Boolean))];
         await keychain.set(WECOM_BOT_ID, payload.botId.trim());
         await keychain.set(WECOM_BOT_SECRET, payload.botSecret.trim());
         input.store.setPublicSetting('wecom', { enabled: payload.enabled !== false, targetIds: targets, websocketUrl: payload.websocketUrl?.trim() || undefined });
@@ -163,8 +177,7 @@ export function createAgentServer(input: {
         const botSecret = await keychain.get(WECOM_BOT_SECRET);
         const setting = input.store.getPublicSetting<{ websocketUrl?: string }>('wecom');
         if (!botId || !botSecret) throw new Error('WeCom Bot is not configured');
-        await testWeComBot({ botId, botSecret, websocketUrl: setting?.value.websocketUrl });
-        return json(response, 200, { authenticated: true });
+        return json(response, 200, await testWeComBot({ botId, botSecret, websocketUrl: setting?.value.websocketUrl }));
       }
       if (request.method === 'POST' && url.pathname === '/api/settings/wecom/send-test') {
         const payload = await body(request) as { markdown?: string };
@@ -172,18 +185,18 @@ export function createAgentServer(input: {
         const botSecret = await keychain.get(WECOM_BOT_SECRET);
         const setting = input.store.getPublicSetting<{ targetIds: string[]; websocketUrl?: string }>('wecom');
         if (!botId || !botSecret || !setting) throw new Error('WeCom Bot is not configured');
-        const result = await sendWeComMarkdown({
+        return json(response, 200, await sendWeComMarkdown({
           botId,
           botSecret,
           targetIds: setting.value.targetIds,
           websocketUrl: setting.value.websocketUrl,
           markdown: payload.markdown?.trim() || '**标讯截图助手**\n企业微信 Bot 测试消息。',
-        });
-        return json(response, 200, result);
+        }));
       }
       return json(response, 404, { error: 'not found' });
     } catch (error) {
-      return json(response, 400, { error: error instanceof Error ? error.message : String(error) });
+      const publicResponse = publicError(error);
+      return json(response, publicResponse.status, publicResponse.payload);
     }
   });
 }
