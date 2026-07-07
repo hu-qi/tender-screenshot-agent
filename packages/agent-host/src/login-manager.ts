@@ -3,10 +3,11 @@ import { mkdir, rm } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
 import { chromium, type BrowserContext } from 'playwright';
 import type { HostConfig } from './config.js';
-import type { LoginSession, PlatformAdapterConfig, PlatformId } from './domain.js';
+import type { LoginSession, PlatformAdapterConfig, PlatformId, PlatformProfileStatus } from './domain.js';
 
 interface ActiveLogin extends LoginSession {
   context: BrowserContext;
+  previousStatus: PlatformProfileStatus;
 }
 
 export class LoginManager {
@@ -25,7 +26,7 @@ export class LoginManager {
     if (inside.startsWith('..') || inside === '') throw new Error('refusing to operate outside an isolated platform profile directory');
   }
 
-  async open(platform: PlatformAdapterConfig): Promise<LoginSession> {
+  async open(platform: PlatformAdapterConfig, previousStatus: PlatformProfileStatus): Promise<LoginSession> {
     if (platform.accessMode === 'public') throw new Error(`${platform.name} is public and does not require an account login profile`);
     const existing = [...this.active.values()].find((session) => session.platformId === platform.id);
     if (existing) return { id: existing.id, platformId: existing.platformId, entryUrl: existing.entryUrl, startedAt: existing.startedAt };
@@ -48,6 +49,7 @@ export class LoginManager {
       platformId: platform.id,
       entryUrl: platform.entryUrl,
       startedAt: new Date().toISOString(),
+      previousStatus,
       context,
     };
     this.active.set(session.id, session);
@@ -62,11 +64,15 @@ export class LoginManager {
     return { id: active.id, platformId: active.platformId, entryUrl: active.entryUrl, startedAt: active.startedAt };
   }
 
-  async cancel(sessionId: string): Promise<void> {
+  async cancel(sessionId: string): Promise<{ session: LoginSession; previousStatus: PlatformProfileStatus } | undefined> {
     const active = this.active.get(sessionId);
-    if (!active) return;
+    if (!active) return undefined;
     await active.context.close().catch(() => undefined);
     this.active.delete(sessionId);
+    return {
+      session: { id: active.id, platformId: active.platformId, entryUrl: active.entryUrl, startedAt: active.startedAt },
+      previousStatus: active.previousStatus,
+    };
   }
 
   async clear(platformId: PlatformId): Promise<void> {
