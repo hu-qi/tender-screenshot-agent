@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 export type QWebBridgeTool =
   | 'navigate'
@@ -233,7 +233,15 @@ export class QWebBridgeClient {
   async networkSummary(): Promise<Array<Record<string, unknown>>> {
     const result = await this.call<{ requests?: Array<Record<string, unknown>> }>('network', { cmd: 'list' });
     return (result.requests || []).slice(0, 500).map((request) => {
-      const url = typeof request.url === 'string' ? new URL(request.url).origin + new URL(request.url).pathname : undefined;
+      let url: string | undefined;
+      if (typeof request.url === 'string') {
+        try {
+          const parsed = new URL(request.url);
+          url = `${parsed.origin}${parsed.pathname}`;
+        } catch {
+          url = '[INVALID_URL]';
+        }
+      }
       return { method: request.method, status: request.status, type: request.type, url };
     });
   }
