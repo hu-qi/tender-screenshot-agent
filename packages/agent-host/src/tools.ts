@@ -21,14 +21,17 @@ export function createSearchPlatformTool(input: {
   return {
     name: 'search_platform',
     label: 'Search tender platform',
-    description: 'Search one configured tender platform and capture admissible local evidence. This tool never bypasses login, CAPTCHA, SMS, QR, CA, or UKey controls.',
+    description: 'Search one configured tender platform and capture local evidence through its recorded lawful access flow.',
     parameters: searchPlatformSchema,
     executionMode: 'sequential',
     async execute(_toolCallId: string, args: SearchPlatformInput, _signal, onUpdate): Promise<AgentToolResult<PlatformOutcome>> {
       const platform = input.platforms.get(args.platformId);
       if (!platform) throw new Error(`unknown platform: ${args.platformId}`);
       input.events.emit(input.runId, 'tool.search_platform.started', 'info', { platformId: platform.id, query: args.query, correlationId: input.correlationId });
-      onUpdate?.({ content: [{ type: 'text', text: `Opening ${platform.name}` }], details: { platformId: platform.id, state: 'running' } });
+      onUpdate?.({
+        content: [{ type: 'text', text: `Opening ${platform.name}` }],
+        details: { platformId: platform.id, status: 'manual-review-required', artifacts: [] },
+      });
       const outcome = await input.browser.execute({
         runId: input.runId,
         platform,
@@ -43,10 +46,7 @@ export function createSearchPlatformTool(input: {
         artifactCount: outcome.artifacts.length,
         correlationId: input.correlationId,
       });
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ platformId: outcome.platformId, status: outcome.status, reason: outcome.reason }) }],
-        details: outcome,
-      };
+      return { content: [{ type: 'text', text: JSON.stringify({ platformId: outcome.platformId, status: outcome.status, reason: outcome.reason }) }], details: outcome };
     },
   };
 }
