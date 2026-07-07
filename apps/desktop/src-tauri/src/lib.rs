@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::{
     env,
+    io,
     net::TcpListener,
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -29,12 +30,13 @@ fn reserve_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-fn agent_host_script() -> Result<PathBuf, String> {
+fn agent_host_script() -> PathBuf {
     if let Ok(path) = env::var("TENDER_AGENT_HOST_SCRIPT") {
-        return Ok(PathBuf::from(path));
+        return PathBuf::from(path);
     }
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    Ok(project_root.join("packages/agent-host/dist/index.js"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("packages/agent-host/dist/index.js")
 }
 
 fn start_agent_host(app: &tauri::App) -> Result<AgentHostState, String> {
@@ -47,7 +49,7 @@ fn start_agent_host(app: &tauri::App) -> Result<AgentHostState, String> {
     let mut command = if let Some(binary) = host_binary {
         Command::new(binary)
     } else {
-        let script = agent_host_script()?;
+        let script = agent_host_script();
         if !script.exists() {
             return Err(format!(
                 "Agent Host build is missing at {}. Run `npm run build:agent-host` before starting the desktop app.",
@@ -60,17 +62,18 @@ fn start_agent_host(app: &tauri::App) -> Result<AgentHostState, String> {
         command
     };
 
+    let port_arg = port.to_string();
+    let data_dir_arg = data_dir.to_string_lossy().into_owned();
+    let config_dir_arg = config_dir.to_string_lossy().into_owned();
     let child = command
-        .args([
-            "--port",
-            &port.to_string(),
-            "--token",
-            &token,
-            "--data-dir",
-            &data_dir.to_string_lossy(),
-            "--config-dir",
-            &config_dir.to_string_lossy(),
-        ])
+        .arg("--port")
+        .arg(&port_arg)
+        .arg("--token")
+        .arg(&token)
+        .arg("--data-dir")
+        .arg(&data_dir_arg)
+        .arg("--config-dir")
+        .arg(&config_dir_arg)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -105,7 +108,8 @@ fn stop_agent_host(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            app.manage(start_agent_host(app)?);
+            let host = start_agent_host(app).map_err(io::Error::other)?;
+            app.manage(host);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![agent_host_config])
