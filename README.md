@@ -38,6 +38,20 @@ Every adapter is explicitly either:
 
 This prevents generic selectors from being represented as a validated integration.
 
+## Local configuration
+
+All local values are maintained in `.env`. A one-command bootstrap validates the file, forces local-only permissions, writes WeCom secrets to macOS Keychain, writes non-secret notification settings to SQLite, and validates the QWebBridge loopback boundary.
+
+```bash
+npm install
+npm run local:config:init
+# 编辑 .env
+npm run local:config:apply
+npm run local:config:doctor
+```
+
+See [本地安全配置：`.env` 单一入口](docs/LOCAL_SECURITY_CONFIG.md) for the complete variable list, Keychain behavior, doctor checks and safe cleanup command.
+
 ## Platform adapter recording
 
 Nine platforms must be recorded and accepted one at a time in an authorized company environment. The full workflow, fixture contract, selector strategy, pagination validation, lawful login lifecycle, CAPTCHA/CA/UKey boundaries, replay gates, drift handling and acceptance-report template are in:
@@ -51,8 +65,8 @@ QWebBridge can inspect the user’s real Chrome session and produce a local cand
 ## Development
 
 ```bash
-cp .env.example .env
 npm install
+npm run local:config:init
 npm run playwright:install
 npm run typecheck
 npm run build:agent-host
@@ -61,9 +75,7 @@ npm run dev:desktop
 
 On its first start, the Agent Host creates `platforms.json` in the local configuration directory. Record and review selector changes there only after a lawful platform acceptance run.
 
-`.env` only contains local runtime parameters such as a browser path, data location and log level. Do not put API keys, Bot credentials, browser cookies, passwords, SMTP passwords, CA/UKey material or a Webhook URL in `.env`.
-
-On macOS, Bot ID and Bot Secret are stored through Keychain. The browser profile is local to the Agent Host data directory.
+The `.env` file is Git-ignored and defaults to `0600`. It may hold local bootstrap values for the configuration command; at runtime Bot ID and Bot Secret are read from macOS Keychain, not SQLite or logs.
 
 ## Verification boundary
 
