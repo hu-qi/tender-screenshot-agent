@@ -43,8 +43,10 @@ This prevents generic selectors from being represented as a validated integratio
 Nine platforms must be recorded and accepted one at a time in an authorized company environment. The full workflow, fixture contract, selector strategy, pagination validation, lawful login lifecycle, CAPTCHA/CA/UKey boundaries, replay gates, drift handling and acceptance-report template are in:
 
 - [平台适配器录制、回放与验收手册](docs/PLATFORM_ADAPTER_RECORDING.md)
+- [Playwright / QWebBridge 探索 Driver 设计](docs/ADAPTER_EXPLORATION_DRIVERS.md)
+- [QWebBridge Candidate Explorer 使用说明](docs/QWEBBRIDGE_EXPLORER.md)
 
-The current runtime has the `unverified` / `verified` guard and local evidence path. Recorder, replay and drift-check automation described in the handbook are explicit next-stage capabilities, not falsely represented as already completed.
+QWebBridge can inspect the user’s real Chrome session and produce a local candidate fixture. It is opt-in, loopback-only, and never upgrades a platform to `verified`; Playwright replay and approval remain mandatory.
 
 ## Development
 

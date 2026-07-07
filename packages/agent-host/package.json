@@ -10,7 +10,8 @@
     "dev": "npm run build && node --watch dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "explore:qwebbridge": "npm run build && node dist/explore-cli.js"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.3",
