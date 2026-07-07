@@ -126,3 +126,22 @@ export interface WeComSettingsStatus {
   websocketUrl?: string;
   updatedAt?: string;
 }
+
+export type WeComRecipientKind = 'userid' | 'chatid';
+export type WeComRecipientSource = 'message' | 'enter_chat';
+
+export interface WeComDiscoveredRecipient {
+  id: string;
+  kind: WeComRecipientKind;
+  source: WeComRecipientSource;
+  selected: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface WeComListenerStatus {
+  state: 'stopped' | 'connecting' | 'listening' | 'error';
+  authenticatedAt?: string;
+  lastError?: string;
+  discoveredCount: number;
+}
