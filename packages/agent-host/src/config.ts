@@ -25,6 +25,8 @@ export interface HostConfig {
   platformConfigPath: string;
   chromiumPath?: string;
   navigationTimeoutMs: number;
+  qwebBridgeEnabled: boolean;
+  qwebBridgeUrl: string;
 }
 
 export function resolveHostConfig(argv: string[]): HostConfig {
@@ -47,6 +49,8 @@ export function resolveHostConfig(argv: string[]): HostConfig {
     platformConfigPath,
     chromiumPath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined,
     navigationTimeoutMs: positiveInteger(process.env.TENDER_BROWSER_TIMEOUT_MS, 45_000, 'TENDER_BROWSER_TIMEOUT_MS'),
+    qwebBridgeEnabled: process.env.TENDER_QWEBBRIDGE_ENABLED === 'true',
+    qwebBridgeUrl: process.env.TENDER_QWEBBRIDGE_URL || 'http://127.0.0.1:10086',
   };
   for (const dir of [config.dataDir, config.configDir, config.profilesDir, config.evidenceDir]) mkdirSync(dir, { recursive: true });
   return config;
