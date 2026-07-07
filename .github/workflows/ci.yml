@@ -23,11 +23,21 @@ jobs:
       - name: Install workspace dependencies without lifecycle scripts
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Typecheck workspaces
-        run: npm run typecheck
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
       - name: Build Pi Agent Host
         run: npm run build:agent-host
       - name: Scan for leaked credentials
         run: npm run secret-scan
+      - name: Upload host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-agent-host-typecheck-log
+          path: typecheck.log
+          if-no-files-found: error
 
   desktop-rust:
     name: Tauri shell check (macOS)
