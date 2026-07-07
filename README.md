@@ -42,13 +42,14 @@ This prevents generic selectors from being represented as a validated integratio
 
 ```bash
 cp .env.example .env
-cp config/platforms.example.json config/platforms.json
 npm install
 npm run playwright:install
 npm run typecheck
 npm run build:agent-host
 npm run dev:desktop
 ```
+
+On its first start, the Agent Host creates `platforms.json` in the local configuration directory. Record and review selector changes there only after a lawful platform acceptance run.
 
 `.env` only contains local runtime parameters such as a browser path, data location and log level. Do not put API keys, Bot credentials, browser cookies, passwords, SMTP passwords, CA/UKey material or a Webhook URL in `.env`.
 
