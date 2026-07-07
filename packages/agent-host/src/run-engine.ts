@@ -1,20 +1,23 @@
 import { join } from 'node:path';
 import { Agent } from '@earendil-works/pi-agent-core';
-import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import type { BrowserEvidenceTool } from './browser.js';
 import type { HostConfig } from './config.js';
 import type { PlatformAdapterConfig, PlatformOutcome, TenderRun, TenderTask } from './domain.js';
 import { RunEvents } from './events.js';
 import { MacOSKeychainStore, WECOM_BOT_ID, WECOM_BOT_SECRET } from './keychain.js';
+import { ModelProfileRuntime, type ResolvedModelProfile } from './model-profile.js';
 import { AccessPolicy } from './policy.js';
 import { TenderStore } from './store.js';
 import { createSearchPlatformTool } from './tools.js';
 import { sendWeComMarkdown } from './wecom.js';
 
+type RequestedPair = { platformId: string; query: string };
+
 export class RunEngine {
   private readonly policy = new AccessPolicy();
   private readonly keychain = new MacOSKeychainStore();
+  private readonly modelRuntime: ModelProfileRuntime;
 
   constructor(
     private readonly config: HostConfig,
@@ -22,7 +25,9 @@ export class RunEngine {
     private readonly events: RunEvents,
     private readonly browser: BrowserEvidenceTool,
     private readonly platforms: Map<string, PlatformAdapterConfig>,
-  ) {}
+  ) {
+    this.modelRuntime = new ModelProfileRuntime(store);
+  }
 
   async start(taskId: string): Promise<TenderRun> {
     const task = this.store.getTask(taskId);
@@ -40,13 +45,29 @@ export class RunEngine {
     return this.store.getPlatformProfile(platform.id, profileDir).status === 'user-confirmed';
   }
 
+  private requestedPairs(task: TenderTask): RequestedPair[] {
+    return task.queries.flatMap((query) => task.platformIds.map((platformId) => ({ platformId, query })));
+  }
+
   private async execute(task: TenderTask, run: TenderRun): Promise<void> {
     const outcomes: PlatformOutcome[] = [];
     this.events.emit(run.id, 'run.started', 'info', { taskId: task.id, correlationId: run.correlationId });
     try {
       const tool = createSearchPlatformTool({ runId: run.id, correlationId: run.correlationId, platforms: this.platforms, browser: this.browser, events: this.events });
-      const piEnabled = Boolean(process.env.TENDER_LLM_PROVIDER && process.env.TENDER_LLM_MODEL);
-      outcomes.push(...(piEnabled ? await this.executeWithPi(task, run, tool) : await this.executeDeterministically(task, run, tool)));
+      const model = await this.modelRuntime.resolve();
+      if (model?.config.mode === 'orchestrate') {
+        this.events.emit(run.id, 'model.profile.enabled', 'info', {
+          profile: model.config.profile,
+          provider: model.config.provider,
+          model: model.config.model,
+          dataPolicy: model.config.dataPolicy,
+          egressPolicy: model.config.egressPolicy,
+          correlationId: run.correlationId,
+        });
+        outcomes.push(...await this.executeWithPi(task, run, tool, model));
+      } else {
+        outcomes.push(...await this.executeDeterministically(task, run, tool));
+      }
       const summary = {
         successful: outcomes.filter((item) => item.status === 'success' || item.status === 'no-result').length,
         manualReview: outcomes.filter((item) => item.status === 'manual-review-required').length,
@@ -68,44 +89,57 @@ export class RunEngine {
   }
 
   private async executeDeterministically(task: TenderTask, run: TenderRun, tool: AgentTool<any>): Promise<PlatformOutcome[]> {
+    return this.executePairs(task, run, tool, this.requestedPairs(task));
+  }
+
+  private async executePairs(task: TenderTask, run: TenderRun, tool: AgentTool<any>, pairs: RequestedPair[]): Promise<PlatformOutcome[]> {
     const outcomes: PlatformOutcome[] = [];
-    for (const query of task.queries) {
-      for (const platformId of task.platformIds) {
-        const platform = this.platforms.get(platformId);
-        if (!platform) continue;
-        const allowed = this.policy.canSearch(platform, { privacyMode: task.privacyMode, hasAuthorizedProfile: this.hasAuthorizedProfile(platform) });
-        if (!allowed.allow) {
-          const outcome: PlatformOutcome = { platformId, status: 'manual-review-required', reason: allowed.reason, artifacts: [] };
-          outcomes.push(outcome);
-          this.events.emit(run.id, 'policy.tool.blocked', 'warn', { tool: tool.name, platformId, reason: allowed.reason, correlationId: run.correlationId });
-          continue;
-        }
-        outcomes.push((await tool.execute(`${run.id}:${platformId}:${query}`, { platformId, query })).details as PlatformOutcome);
+    for (const { query, platformId } of pairs) {
+      const platform = this.platforms.get(platformId);
+      if (!platform) continue;
+      const allowed = this.policy.canSearch(platform, { privacyMode: task.privacyMode, hasAuthorizedProfile: this.hasAuthorizedProfile(platform) });
+      if (!allowed.allow) {
+        const outcome: PlatformOutcome = { platformId, status: 'manual-review-required', reason: allowed.reason, artifacts: [] };
+        outcomes.push(outcome);
+        this.events.emit(run.id, 'policy.tool.blocked', 'warn', { tool: tool.name, platformId, reason: allowed.reason, correlationId: run.correlationId });
+        continue;
       }
+      outcomes.push((await tool.execute(`${run.id}:${platformId}:${query}`, { platformId, query })).details as PlatformOutcome);
     }
     return outcomes;
   }
 
-  private async executeWithPi(task: TenderTask, run: TenderRun, tool: AgentTool<any>): Promise<PlatformOutcome[]> {
-    const provider = process.env.TENDER_LLM_PROVIDER!;
-    const modelId = process.env.TENDER_LLM_MODEL!;
-    const model = builtinModels().getModel(provider, modelId);
-    if (!model) throw new Error(`Pi model is not available: ${provider}/${modelId}`);
-
+  private async executeWithPi(task: TenderTask, run: TenderRun, tool: AgentTool<any>, modelProfile: ResolvedModelProfile): Promise<PlatformOutcome[]> {
     const outcomes: PlatformOutcome[] = [];
+    const pairs = this.requestedPairs(task);
+    const allowedPairs = new Set(pairs.map((pair) => `${pair.platformId}\u0000${pair.query}`));
+    const startedPairs = new Set<string>();
+    let modelTurns = 0;
     const agent = new Agent({
       initialState: {
-        systemPrompt: 'You orchestrate lawful tender evidence collection. Call search_platform only for requested pairs. Never bypass login, CAPTCHA, SMS, QR, CA, or UKey controls.',
-        model,
+        systemPrompt: [
+          'You orchestrate lawful tender evidence collection.',
+          'Call search_platform only for the requested platform/query pairs.',
+          'You receive metadata and tool summaries only; never request screenshots, HTML, PDFs, browser profiles, cookies, credentials, or local paths.',
+          'Never bypass login, CAPTCHA, SMS, QR, CA, or UKey controls.',
+        ].join(' '),
+        model: modelProfile.model,
         tools: [tool],
         messages: [],
       },
+      streamFn: (model, context, options) => modelProfile.models.streamSimple(model, context, options),
       toolExecution: 'sequential',
       beforeToolCall: async ({ args }) => {
-        const platform = this.platforms.get((args as { platformId?: string }).platformId || '');
+        const input = args as { platformId?: string; query?: string };
+        const key = `${input.platformId || ''}\u0000${input.query || ''}`;
+        if (!allowedPairs.has(key)) return { block: true, reason: 'pair is outside the user-requested execution set' };
+        if (startedPairs.has(key)) return { block: true, reason: 'pair was already requested in this run' };
+        const platform = this.platforms.get(input.platformId || '');
         if (!platform) return { block: true, reason: 'unknown platform' };
         const allowed = this.policy.canSearch(platform, { privacyMode: task.privacyMode, hasAuthorizedProfile: this.hasAuthorizedProfile(platform) });
-        return allowed.allow ? undefined : { block: true, reason: allowed.reason };
+        if (!allowed.allow) return { block: true, reason: allowed.reason };
+        startedPairs.add(key);
+        return undefined;
       },
       afterToolCall: async ({ result }) => {
         const outcome = result.details as PlatformOutcome | undefined;
@@ -114,10 +148,28 @@ export class RunEngine {
       },
     });
     agent.subscribe(async (event) => {
+      if (event.type === 'turn_start') {
+        modelTurns += 1;
+        if (modelTurns > modelProfile.config.maxRequestsPerRun) {
+          this.events.emit(run.id, 'model.request.limit_reached', 'warn', { maxRequestsPerRun: modelProfile.config.maxRequestsPerRun, correlationId: run.correlationId });
+          agent.abort();
+          return;
+        }
+      }
       this.events.emit(run.id, `pi.${event.type}`, 'info', { correlationId: run.correlationId });
     });
-    const pairs = task.queries.flatMap((query) => task.platformIds.map((platformId) => ({ platformId, query })));
-    await agent.prompt(`Collect evidence for exactly these pairs: ${JSON.stringify(pairs)}`);
+
+    try {
+      await agent.prompt(`Collect evidence for exactly these pairs: ${JSON.stringify(pairs)}. Do not make any other browser request.`);
+    } catch (error) {
+      this.events.emit(run.id, 'model.orchestration.failed', 'warn', { reason: error instanceof Error ? error.message : String(error), correlationId: run.correlationId });
+    }
+
+    const missing = pairs.filter((pair) => !startedPairs.has(`${pair.platformId}\u0000${pair.query}`));
+    if (missing.length > 0) {
+      this.events.emit(run.id, 'model.deterministic.fallback', 'warn', { missingPairs: missing.length, correlationId: run.correlationId });
+      outcomes.push(...await this.executePairs(task, run, tool, missing));
+    }
     return outcomes;
   }
 
