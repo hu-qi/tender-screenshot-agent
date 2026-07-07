@@ -8,10 +8,10 @@ import { TenderStore } from './store.js';
 
 const USAGE = `
 Usage:
-  npm run security -- init
-  npm run security -- apply
-  npm run security -- doctor
-  npm run security -- clear-wecom --confirm-clear-wecom
+  npm run local:config -- init
+  npm run local:config -- apply
+  npm run local:config -- doctor
+  npm run local:config -- clear-wecom --confirm-clear-wecom
 
 Commands:
   init          Create .env from .env.example when missing and set local-only permissions.
@@ -56,30 +56,35 @@ async function init(): Promise<void> {
 }
 
 function openStore() {
-  // The Host config requires a token for its HTTP server. The security CLI never opens that server.
+  // The Host config requires a token for its HTTP server. The local configuration CLI never opens that server.
   process.env.TENDER_AGENT_TOKEN ||= 'security-cli-local-only';
   const config = resolveHostConfig(process.argv.slice(3));
   const store = new TenderStore(join(config.dataDir, 'tender-agent.db'));
   return { config, store };
 }
 
+function persistWeComPublicSettings(store: TenderStore, input: { enabled: boolean; targetIds: string[]; websocketUrl?: string }): void {
+  store.setPublicSetting('wecom', input);
+}
+
 async function apply(): Promise<void> {
   const { config, store } = openStore();
   const security = loadSecurityBootstrap(process.env);
   const permissions = await ensureEnvPermissions(envFile(), security.enforceEnvPermissions);
-  const keychain = new MacOSKeychainStore();
 
   if (security.wecom.botId && security.wecom.botSecret) {
+    const keychain = new MacOSKeychainStore();
     await keychain.set(WECOM_BOT_ID, security.wecom.botId);
     await keychain.set(WECOM_BOT_SECRET, security.wecom.botSecret);
-    store.setPublicSetting('wecom', {
-      enabled: security.wecom.enabled,
-      targetIds: security.wecom.targetIds,
-      websocketUrl: security.wecom.websocketUrl,
-    });
   } else if (security.wecom.enabled) {
     throw new Error('TENDER_WECOM_ENABLED=true requires TENDER_WECOM_BOT_ID and TENDER_WECOM_BOT_SECRET in .env');
   }
+  // Persist enabled=false too, so .env can safely disable a previously enabled bot without deleting Keychain credentials.
+  persistWeComPublicSettings(store, {
+    enabled: security.wecom.enabled,
+    targetIds: security.wecom.targetIds,
+    websocketUrl: security.wecom.websocketUrl,
+  });
 
   // Force registry creation while applying config so paths fail early, without touching adapter state.
   const platformCount = loadPlatformRegistry(config).length;
@@ -99,7 +104,7 @@ async function doctor(): Promise<void> {
   const warnings: string[] = [];
   const target = envFile();
   if (!existsSync(target)) {
-    issues.push(`missing .env: ${target}; run npm run security -- init`);
+    issues.push(`missing .env: ${target}; run npm run local:config -- init`);
   }
 
   let config: ReturnType<typeof resolveHostConfig> | undefined;
@@ -113,7 +118,7 @@ async function doctor(): Promise<void> {
     if (existsSync(target)) {
       const permissions = await ensureEnvPermissions(target, false);
       if (security.enforceEnvPermissions && permissions.mode !== '0600') {
-        issues.push(`insecure .env mode ${permissions.mode}; expected 0600; run npm run security -- apply`);
+        issues.push(`insecure .env mode ${permissions.mode}; expected 0600; run npm run local:config -- apply`);
       }
     }
   } catch (error) {
@@ -132,7 +137,7 @@ async function doctor(): Promise<void> {
       const keychain = new MacOSKeychainStore();
       botIdPresent = Boolean(await keychain.get(WECOM_BOT_ID));
       botSecretPresent = Boolean(await keychain.get(WECOM_BOT_SECRET));
-      if (botIdPresent !== botSecretPresent) issues.push('WeCom Keychain credentials are incomplete; run npm run security -- apply');
+      if (botIdPresent !== botSecretPresent) issues.push('WeCom Keychain credentials are incomplete; run npm run local:config -- apply');
     } catch (error) {
       issues.push(`macOS Keychain check failed: ${error instanceof Error ? error.message : String(error)}`);
     }
