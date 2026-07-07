@@ -12,7 +12,7 @@ Tauri desktop shell
        ├─ Pi Agent Core: state, tools, lifecycle events
        ├─ Playwright: platform access and evidence capture
        ├─ SQLite: tasks, runs, append-only events, artifact index
-       ├─ macOS Keychain: Bot ID / Bot Secret
+       ├─ macOS Keychain: Bot ID / Bot Secret / Model API key
        └─ WeCom AI Bot SDK: WebSocket authentication and notification
 ```
 
@@ -21,7 +21,7 @@ Tauri no longer owns task state, evidence persistence, notification state, crede
 ## Execution modes
 
 - **Deterministic default:** runs every `query × platform` pair in order. Tender collection must be exhaustive, so baseline execution does not depend on LLM planning.
-- **Pi orchestration:** enabled only when both `TENDER_LLM_PROVIDER` and `TENDER_LLM_MODEL` are configured. Pi Agent Core receives the same real tools and the same policy gate for planning, relevance decisions and summarization.
+- **Pi orchestration:** requires an enabled, applied model Profile. It receives only query/platform metadata and tool summaries. It cannot request raw evidence or bypass policy. Any requested pair it does not complete is returned to the deterministic runner.
 
 ## Tool boundary
 
@@ -40,7 +40,7 @@ This prevents generic selectors from being represented as a validated integratio
 
 ## Local configuration
 
-All local values are maintained in `.env`. A one-command bootstrap validates the file, forces local-only permissions, writes WeCom secrets to macOS Keychain, writes non-secret notification settings to SQLite, and validates the QWebBridge loopback boundary.
+All local values are maintained in `.env`. A one-command bootstrap validates the file, forces local-only permissions, writes WeCom and model API secrets to macOS Keychain, writes non-secret profiles to SQLite, and validates QWebBridge and model egress boundaries.
 
 ```bash
 npm install
@@ -50,7 +50,7 @@ npm run local:config:apply
 npm run local:config:doctor
 ```
 
-See [本地安全配置：`.env` 单一入口](docs/LOCAL_SECURITY_CONFIG.md) for the complete variable list, Keychain behavior, doctor checks and safe cleanup command.
+See [本地安全配置：`.env` 单一入口](docs/LOCAL_SECURITY_CONFIG.md) and [Pi 模型安全 Profile](docs/MODEL_SECURITY_PROFILE.md) for complete variables, Keychain behavior, egress policy, model health tests and safe cleanup commands.
 
 ## Platform adapter recording
 
@@ -75,7 +75,7 @@ npm run dev:desktop
 
 On its first start, the Agent Host creates `platforms.json` in the local configuration directory. Record and review selector changes there only after a lawful platform acceptance run.
 
-The `.env` file is Git-ignored and defaults to `0600`. It may hold local bootstrap values for the configuration command; at runtime Bot ID and Bot Secret are read from macOS Keychain, not SQLite or logs.
+The `.env` file is Git-ignored and defaults to `0600`. It may hold local bootstrap values for the configuration command; at runtime Bot ID, Bot Secret and model API keys are read from macOS Keychain, not SQLite or logs.
 
 ## Verification boundary
 
