@@ -12,7 +12,7 @@ import { TenderStore } from './store.js';
 import { createSearchPlatformTool } from './tools.js';
 import { sendWeComMarkdown } from './wecom.js';
 
-type RequestedPair = { platformId: string; query: string };
+type RequestedPair = { platformId: PlatformOutcome['platformId']; query: string };
 
 export class RunEngine {
   private readonly policy = new AccessPolicy();
