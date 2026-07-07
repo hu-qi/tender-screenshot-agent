@@ -36,11 +36,6 @@ function macOSChromeCandidates(): string[] {
   ];
 }
 
-function limitProcessOutput(value: string): string {
-  const normalized = value.replace(/\r/g, '').trim();
-  return normalized.length > 1_000 ? `${normalized.slice(-1_000)}…` : normalized;
-}
-
 export class BrowserRuntimeManager {
   private installPromise?: Promise<BrowserRuntimeStatus>;
 
@@ -125,7 +120,7 @@ export class BrowserRuntimeManager {
     if (this.config.chromiumPath) throw new BrowserRuntimeError(current);
     if (this.installPromise) return this.installPromise;
 
-    this.installPromise = new Promise<BrowserRuntimeStatus>((resolve, reject) => {
+    const installation = new Promise<BrowserRuntimeStatus>((resolve, reject) => {
       let cliPath: string;
       try {
         cliPath = require.resolve('playwright/cli');
@@ -136,16 +131,17 @@ export class BrowserRuntimeManager {
       const child = spawn(process.execPath, [cliPath, 'install', 'chromium'], {
         cwd: process.cwd(),
         env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'ignore', 'pipe'],
       });
-      let output = '';
-      child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
-      child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
-      child.once('error', (error) => reject(new Error(`Unable to start Playwright browser installation: ${error.message}`)));
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+      child.once('error', () => reject(new Error('Unable to start Playwright browser installation. Check Node.js and local project dependencies.')));
       child.once('close', (code) => {
         if (code !== 0) {
-          const detail = limitProcessOutput(output);
-          reject(new Error(`Playwright Chromium installation failed${detail ? `: ${detail}` : ''}`));
+          const hint = /proxy|certificate|econn|network|enotfound|timeout/i.test(stderr)
+            ? ' Check network, proxy, or certificate settings and retry.'
+            : '';
+          reject(new Error(`Playwright Chromium installation failed.${hint} You can also run \`npm run playwright:install\` in the project root.`));
           return;
         }
         const next = this.status();
@@ -157,6 +153,7 @@ export class BrowserRuntimeManager {
       });
     }).finally(() => { this.installPromise = undefined; });
 
-    return this.installPromise;
+    this.installPromise = installation;
+    return installation;
   }
 }
