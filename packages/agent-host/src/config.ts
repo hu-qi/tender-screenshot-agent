@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { PlatformAdapterConfig, PlatformId } from './domain.js';
 
@@ -11,26 +10,14 @@ const defaults: PlatformAdapterConfig[] = [
   ['tower-eprocurement', '中国铁塔电子采购平台', 'https://ebid.chinatowercom.cn/', 'ca-login'],
   ['cebpubservice', '中国招标投标公共服务平台', 'https://bulletin.cebpubservice.com/', 'public'],
   ['miit', '工信部通信工程建设项目招标投标管理信息平台', 'https://txzbqy.miit.gov.cn/', 'manual-login'],
-  ['gd-govprocurement', '广东省政府采购网', 'https://gdgpo.czt.gd.gov.cn/', 'public'],
+  ['gd-govprocurement', '广东省政府采购网', 'https://ygp.gdzwfw.gov.cn/', 'public'],
   ['gd-public-resources', '广东省公共资源交易平台', 'https://ygp.gdzwfw.gov.cn/', 'public'],
 ].map(([id, name, entryUrl, accessMode]) => ({ id: id as PlatformId, name, entryUrl, accessMode: accessMode as PlatformAdapterConfig['accessMode'], adapterStatus: 'unverified' }));
 
-export interface HostConfig {
-  port: number;
-  token: string;
-  dataDir: string;
-  configDir: string;
-  profilesDir: string;
-  evidenceDir: string;
-  platformConfigPath: string;
-  chromiumPath?: string;
-}
+export interface HostConfig { port: number; token: string; dataDir: string; configDir: string; profilesDir: string; evidenceDir: string; platformConfigPath: string; chromiumPath?: string; }
 
 export function resolveHostConfig(argv: string[]): HostConfig {
-  const option = (name: string): string | undefined => {
-    const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : undefined;
-  };
+  const option = (name: string): string | undefined => { const index = argv.indexOf(name); return index >= 0 ? argv[index + 1] : undefined; };
   const dataDir = resolve(option('--data-dir') || process.env.TENDER_DATA_DIR || resolve(process.cwd(), '.tender-agent'));
   const configDir = resolve(option('--config-dir') || process.env.TENDER_CONFIG_DIR || resolve(process.cwd(), 'config'));
   const port = Number(option('--port') || process.env.TENDER_AGENT_PORT || '39177');
@@ -38,16 +25,7 @@ export function resolveHostConfig(argv: string[]): HostConfig {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('TENDER_AGENT_PORT must be a valid TCP port');
   if (!token) throw new Error('TENDER_AGENT_TOKEN is required; the host refuses unauthenticated local requests');
   const platformConfigPath = resolve(process.env.TENDER_PLATFORM_CONFIG || resolve(configDir, 'platforms.json'));
-  const config: HostConfig = {
-    port,
-    token,
-    dataDir,
-    configDir,
-    profilesDir: resolve(dataDir, 'profiles'),
-    evidenceDir: resolve(dataDir, 'evidence'),
-    platformConfigPath,
-    chromiumPath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined,
-  };
+  const config: HostConfig = { port, token, dataDir, configDir, profilesDir: resolve(dataDir, 'profiles'), evidenceDir: resolve(dataDir, 'evidence'), platformConfigPath, chromiumPath: process.env.TENDER_PLAYWRIGHT_CHROMIUM_PATH || undefined };
   for (const dir of [config.dataDir, config.configDir, config.profilesDir, config.evidenceDir]) mkdirSync(dir, { recursive: true });
   return config;
 }
@@ -55,8 +33,7 @@ export function resolveHostConfig(argv: string[]): HostConfig {
 export function loadPlatformRegistry(config: HostConfig): PlatformAdapterConfig[] {
   if (!existsSync(config.platformConfigPath)) {
     mkdirSync(dirname(config.platformConfigPath), { recursive: true });
-    const content = JSON.stringify({ version: 2, platforms: defaults }, null, 2);
-    require('node:fs').writeFileSync(config.platformConfigPath, `${content}\n`);
+    writeFileSync(config.platformConfigPath, `${JSON.stringify({ version: 2, platforms: defaults }, null, 2)}\n`);
     return defaults;
   }
   const parsed = JSON.parse(readFileSync(config.platformConfigPath, 'utf8')) as { platforms?: PlatformAdapterConfig[] };
