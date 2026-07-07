@@ -69,7 +69,7 @@ export class BrowserEvidenceTool {
     const page = await context.newPage();
 
     try {
-      await page.goto(platform.entryUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      await page.goto(platform.entryUrl, { waitUntil: 'domcontentloaded', timeout: this.config.navigationTimeoutMs });
       const landingPath = join(outputDir, 'landing.png');
       await page.screenshot({ path: landingPath, fullPage: true });
       artifacts.push(await this.writeArtifact(runId, platform.id, 'landing-screenshot', landingPath));
@@ -107,7 +107,7 @@ export class BrowserEvidenceTool {
         return { platformId: platform.id, status: 'no-result', artifacts };
       }
       const href = await firstResult.getAttribute('href');
-      if (href) await page.goto(new URL(href, platform.entryUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      if (href) await page.goto(new URL(href, platform.entryUrl).toString(), { waitUntil: 'domcontentloaded', timeout: this.config.navigationTimeoutMs });
       const detailPath = join(outputDir, 'detail.png');
       await page.screenshot({ path: detailPath, fullPage: true });
       artifacts.push(await this.writeArtifact(runId, platform.id, 'detail-screenshot', detailPath));
